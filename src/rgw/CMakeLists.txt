@@ -66,7 +66,6 @@ set(librgw_common_srcs
   rgw_dencoder.cc
   rgw_dmclock_scheduler_ctx.cc
   rgw_dmclock_sync_scheduler.cc
-  rgw_dmclock_async_scheduler.cc
   rgw_env.cc
   rgw_es_query.cc
   rgw_formats.cc
@@ -234,7 +233,8 @@ endif()
 if(WITH_RADOSGW_BEAST_FRONTEND)
   list(APPEND radosgw_srcs
     rgw_asio_client.cc
-    rgw_asio_frontend.cc)
+    rgw_asio_frontend.cc
+    rgw_dmclock_async_scheduler.cc)
 endif()
 
 add_library(radosgw_a STATIC ${radosgw_srcs}
