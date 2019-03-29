@@ -64,9 +64,6 @@ class DeepSea(Task):
         cli:
             true        deepsea CLI will be used (the default)
             false       deepsea CLI will not be used
-        dashboard_ssl:
-            true        deploy MGR dashboard module with SSL (the default)
-            false       deploy MGR dashboard module *without* SSL
         log_anchor      a string (default: "WWWW: ") which will precede
                         log messages emitted at key points during the
                         deployment
@@ -160,7 +157,6 @@ class DeepSea(Task):
             introspect_roles(self.ctx, self.log, quiet=False)
         self.allow_python2 = deepsea_ctx['allow_python2']
         self.alternative_defaults = deepsea_ctx['alternative_defaults']
-        self.dashboard_ssl = deepsea_ctx['dashboard_ssl']
         self.deepsea_cli = deepsea_ctx['cli']
         self.dev_env = self.ctx['dev_env']
         self.install_method = deepsea_ctx['install_method']
@@ -384,7 +380,6 @@ class DeepSea(Task):
         if not isinstance(deepsea_ctx['alternative_defaults'], dict):
             raise ConfigError(self.err_prefix + "alternative_defaults must be a dict")
         deepsea_ctx['cli'] = self.config.get('cli', True)
-        deepsea_ctx['dashboard_ssl'] = self.config.get('dashboard_ssl', True)
         deepsea_ctx['log_anchor'] = self.config.get('log_anchor', self.log_anchor_str)
         if not isinstance(deepsea_ctx['log_anchor'], str):
             self.log.warning(
@@ -982,20 +977,6 @@ class Orch(DeepSea):
             ganesha_remote = self.remotes[ganesha_host]
             ganesha_remote.run(args="cat /etc/ganesha/ganesha.conf")
 
-    def __mgr_dashboard_module_deploy(self):
-        script = ("# deploy MGR dashboard module\n"
-                  "set -ex\n"
-                  "ceph mgr module enable dashboard\n")
-        if self.dashboard_ssl:
-            script += "ceph dashboard create-self-signed-cert\n"
-        else:
-            script += "ceph config set mgr mgr/dashboard/ssl false\n"
-        remote_run_script_as_root(
-            self.master_remote,
-            'mgr_dashboard_module_deploy.sh',
-            script,
-            )
-
     def __zypper_ps_with_possible_reboot(self):
         if self.sm.all_minions_zypper_ps_requires_reboot():
             log_spec = "Detected updates requiring reboot"
@@ -1159,7 +1140,6 @@ class Orch(DeepSea):
         stage = 3
         self.__log_stage_start(stage)
         self._run_orch(("stage", stage))
-        # self.__mgr_dashboard_module_deploy()
         self.sm.all_minions_cmd_run(
             'cat /etc/ceph/ceph.conf',
             abort_on_fail=False
