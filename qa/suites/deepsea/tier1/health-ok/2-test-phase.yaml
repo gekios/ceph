@@ -6,3 +6,6 @@ tasks:
                         - 'ceph -s'
         - deepsea.validation:
                 rados_write_test:
+        - ses_qa:
+        - ses_qa.validation:
+                mgr_plugin_dashboard:
