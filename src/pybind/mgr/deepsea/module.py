@@ -172,17 +172,46 @@ class DeepSeaOrchestrator(MgrModule, orchestrator.Orchestrator):
         # function query OSD information from DeepSea doesn't make a lot of
         # sense (DeepSea would have to call back into Ceph).
 
-        assert service_type in ("mon", "mgr", "mds", "rgw", None), service_type + " unsupported"
+        assert service_type in ("mon", "mgr", "mds", "rgw", "nfs", "iscsi", None), service_type + " unsupported"
+
+        def _deepsea_to_ceph(service):
+            if service == "ganesha":
+                return "nfs"
+            elif service == "igw":
+                return "iscsi"
+            else:
+                return service
+
+        def _ceph_to_deepsea(service):
+            if service == "nfs":
+                return "ganesha"
+            elif service == "iscsi":
+                return "igw"
+            else:
+                return service
 
         def process_result(event_data):
             result = []
             if event_data['success']:
                 for node_name, service_info in event_data["return"].items():
-                    for service_type, service_instance in service_info.items():
+                    for service_type, service_dict in service_info.items():
+                        if type(service_dict) == str:
+                            # map old form where deepsea only returned service IDs
+                            # to new form where it retuns a dict
+                            service_dict = { 'service_instance': service_dict }
                         desc = orchestrator.ServiceDescription()
+                        # We'll always have nodename, service_instance and service_type
                         desc.nodename = node_name
-                        desc.service_instance = service_instance
-                        desc.service_type = service_type
+                        desc.service_instance = service_dict['service_instance']
+                        desc.service_type = _deepsea_to_ceph(service_type)
+                        # We may or may not have any of the following
+                        desc.container_id = service_dict.get('container_id', None)
+                        desc.service = service_dict.get('service', None)
+                        desc.version = service_dict.get('version', None)
+                        desc.rados_config_location = service_dict.get('rados_config_location', None)
+                        desc.service_url = service_dict.get('service_url', None)
+                        desc.status = service_dict.get('status', None)
+                        desc.status_desc = service_dict.get('status_desc', None)
                         result.append(desc)
             else:
                 self.log.error(event_data['return'])
@@ -194,7 +223,7 @@ class DeepSeaOrchestrator(MgrModule, orchestrator.Orchestrator):
             resp = self._do_request_with_login("POST", data = {
                 "client": "runner_async",
                 "fun": "mgr_orch.describe_service",
-                "role": service_type,
+                "role": _ceph_to_deepsea(service_type),
                 "service_id": service_id,
                 "node": node_name
             })
