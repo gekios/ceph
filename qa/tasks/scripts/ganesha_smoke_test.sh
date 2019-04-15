@@ -59,19 +59,69 @@ TOKEN=$(curl --insecure -s -H "Content-Type: application/json" -X POST \
             -d '{"username":"admin","password":"admin"}'  $API_URL/api/auth \
             | jq -r .token)
 
-function rest_call {
+function curl_call {
   local method=$1
   local path=$2
   local data=$3
 
-  result=$(curl --insecure -s -b /tmp/cd-cookie.txt -H "Authorization: Bearer $TOKEN " \
-               -H "Content-Type: application/json" -X $method -d "$data" \
-               ${API_URL}$path)
+  local tmp_file="/tmp/curl.out"
+  rm -f $tmp_file
+  curl \
+     --insecure \
+     --silent \
+     --include \
+     --cookie /tmp/cd-cookie.txt \
+     --header "Authorization: Bearer $TOKEN " \
+     --header "Content-Type: application/json" \
+     --request $method \
+     --data "$data" \
+     ${API_URL}$path | tee $tmp_file
+}
+
+function status_code {
+  head -n 1 $tmp_file | cut -d' ' -f 2)
+}
+
+function rest_call {
+  local method=$1
+  local path=$2
+  local data=$3
+  local timeout=$4
+
+  curl_call "$method" "$path" "$data"
+  local status_code=$(status_code)
+
+  if [ "$status_code" = "202" ] ; then
+  fi
+  local body=$(echo "$curl_output" | sed -e '1,/^\s*$/ d')
+  if [ "$status_code" = "200" ] ; then
+      return "$body"
+  fi
+  if [ "$status_code" != "202" ] ; then
+      echo "curl command returned status code other than 200 or 202 - bailing out!"
+      exit 1
+  fi
+  local retries = "$timeout"
+  local task=$(echo "$body" | jq -r .name)
+  return $(poll_async_request "$task" $timeout)
+}
+
+function poll_async_request {
+  local task=$1
+  local timeout=$2
+  echo "Status code 202 received: polling task $task"
+  local res_task = ""
+  while test $retries -gt 0 -a -z "$res_task" ; do
+    retries = $(($retries - 1))
+    sleep 1
+    local 
+
+  done
   echo "$result"
 }
 
 function get_ganesha_daemons {
-  daemons=$(rest_call GET /api/nfs-ganesha/daemon)
+  daemons=$(rest_call GET /api/nfs-ganesha/daemon 60)
   daemons=$(echo $daemons | jq -r .[].daemon_id)
   echo "$daemons" | sed ':a;N;$!ba;s/\n/,/g'
 }
@@ -110,7 +160,7 @@ function create_cephfs_export {
 }
 EOF
 
-  result=$(rest_call POST /api/nfs-ganesha/export "$(cat /tmp/export.json)")
+  result=$(rest_call POST /api/nfs-ganesha/export "$(cat /tmp/export.json)" 60)
   echo $result | jq -r .export_id
 }
 
@@ -138,13 +188,13 @@ function create_rgw_export {
 }
 EOF
 
-  result=$(rest_call POST /api/nfs-ganesha/export "$(cat /tmp/export.json)")
+  result=$(rest_call POST /api/nfs-ganesha/export "$(cat /tmp/export.json)" 60)
   echo $result | jq -r .export_id
 }
 
 function delete_export {
   local export_id=$1
-  result=$(rest_call DELETE /api/nfs-ganesha/export/_default_/$export_id)
+  result=$(rest_call DELETE /api/nfs-ganesha/export/_default_/$export_id 60)
   echo $result
 }
 
@@ -189,7 +239,7 @@ function test_cephfs_export {
   echo "Mounting CephFS filesystem using kernel client to check hello.txt"
   mkdir -p $NFS_MOUNTPOINT
   mount -t ceph $MON_ADDR:/ $NFS_MOUNTPOINT -o name=admin,secret=$CEPHX_ADMIN_KEY
-  text=`cat ${NFS_MOUNTPOINT}${ex_path}/hello.txt`
+  text=$(cat ${NFS_MOUNTPOINT}${ex_path}/hello.txt)
   if [ ! -n "$text" ]; then
     echo "ERROR: hello world text not found"
     false
@@ -218,7 +268,7 @@ function test_rgw_export {
   delete_export $EXPORT_ID
   sleep 3
 
-  found=`radosgw-admin bi get --object=hello.txt --bucket=$ex_path | jq -r .entry.name`
+  found=$(radosgw-admin bi get --object=hello.txt --bucket=$ex_path | jq -r .entry.name)
   if [ ! -n "$found" ]; then
     echo "ERROR: hello.txt not found in bucket $ex_path"
     false
