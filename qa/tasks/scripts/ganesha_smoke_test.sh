@@ -139,6 +139,9 @@ function create_rgw_export {
 EOF
 
   result=$(rest_call POST /api/nfs-ganesha/export "$(cat /tmp/export.json)")
+  curl --insecure -s -b /tmp/cd-cookie.txt -H "Authorization: Bearer $TOKEN " \
+      -H "Content-Type: application/json" -X GET \
+      "${API_URL}/api/task?name=nfs/create"
   echo $result | jq -r .export_id
 }
 
