@@ -28,10 +28,13 @@ if [ "$WITH_PYTHON2" = "ON" ]; then
 fi
 if [ "$WITH_PYTHON3" = "ON" ]; then
   if [[ -n "$@" ]]; then
-    ENV_LIST+="py3-run"
+    ENV_LIST+="py3-run,"
   else
     ENV_LIST+="py3-cov,py3-lint"
   fi
 fi
+ENV_LIST=$(echo "$ENV_LIST" | sed -e 's/,$//')
 
-tox -c ${TOX_PATH} -e "$ENV_LIST" "$@"
+echo "TOX_PATH: ->$TOX_PATH<-"
+echo "ENV_LIST: ->$ENV_LIST<-"
+tox -c "${TOX_PATH}" -e "$ENV_LIST" "$@"

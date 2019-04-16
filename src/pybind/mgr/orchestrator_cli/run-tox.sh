@@ -23,10 +23,13 @@ then
 fi
 
 if [ "$WITH_PYTHON2" = "ON" ]; then
-  ENV_LIST+="py27"
+  ENV_LIST+="py27,"
 fi
 if [ "$WITH_PYTHON3" = "ON" ]; then
-  ENV_LIST+=",py3"
+  ENV_LIST+="py3,"
 fi
+ENV_LIST=$(echo "$ENV_LIST" | sed -e 's/,$//')
 
-tox -c ${TOX_PATH} -e ${ENV_LIST}
+echo "TOX_PATH: ->$TOX_PATH<-"
+echo "ENV_LIST: ->$ENV_LIST<-"
+tox -c "${TOX_PATH}" -e "${ENV_LIST}"
