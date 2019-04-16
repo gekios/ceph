@@ -35,6 +35,8 @@ if [ "$WITH_PYTHON3" = "ON" ]; then
 fi
 ENV_LIST=$(echo "$ENV_LIST" | sed -e 's/,$//')
 
+echo "WITH_PYTHON2: ->$WITH_PYTHON2<-"
+echo "WITH_PYTHON3: ->$WITH_PYTHON3<-"
 echo "TOX_PATH: ->$TOX_PATH<-"
 echo "ENV_LIST: ->$ENV_LIST<-"
 tox -c "${TOX_PATH}" -e "$ENV_LIST" "$@"
