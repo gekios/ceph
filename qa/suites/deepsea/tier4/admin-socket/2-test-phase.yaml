@@ -1,0 +1,5 @@
+tasks:
+        - exec:
+                client.salt_master:
+                        - 'ceph -s'
+                        - 'ceph_test_admin_socket_output --all'
