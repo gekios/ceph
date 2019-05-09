@@ -1,0 +1,32 @@
+tasks:
+        - deepsea.create_pools:
+                cephfs:
+        - deepsea.orch:
+                stage: 4
+        - exec:
+                client.salt_master:
+                        - 'ceph -s'
+        - exec:
+                client.salt_master:
+                        - 'ceph tell mon.\* injectargs --mon-allow-pool-delete=true'
+        - exec:
+                client.salt_master:
+                        - 'ceph osd pool delete cephfs_data cephfs_data --yes-i-really-really-mean-it'
+        - exec:
+                client.salt_master:
+                        - 'ceph osd pool delete cephfs_metadata cephfs_metadata --yes-i-really-really-mean-it'
+        - exec:
+                client.salt_master:
+                        - 'ceph osd pool delete iscsi-images iscsi-images --yes-i-really-really-mean-it'
+        - exec:
+                client.salt_master:
+                        - 'sleep 10'
+        - exec:
+                client.salt_master:
+                        - 'ceph -s'
+        - exec:
+               client.salt_master:
+                        - 'ceph osd pool ls'
+        - exec:
+               client.salt_master:
+                        - 'ceph osd pool stats'
