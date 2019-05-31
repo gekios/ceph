@@ -18,15 +18,29 @@ cp -a /etc/zypp/repos.d /etc/zypp/repos.d.bck
 rm -f /etc/zypp/repos.d/*
 
 for repo_spec in "$@" ; do
-    repo_name=$(echo $repo_spec | sed -e 's/\:.*$//')
-    repo_url=$(echo $repo_spec | sed -e 's/^.*\:\(http:.*$\)/\1/')
-    zypper \
-        --non-interactive \
-        addrepo \
-        --refresh \
-        --no-gpgcheck \
-        $repo_url \
-        $repo_name
+    if [[ "$repo_spec" =~ '!' ]] ; then
+        repo_name=$(echo $repo_spec | sed -e 's/\!.*$//')
+        repo_prio=$(echo $repo_spec | sed -e 's/^.*\!\([[:digit:]]\+\)\:.*$/\1/')
+        repo_url=$(echo $repo_spec | sed -e 's/^.*\:\(http:.*$\)/\1/')
+        zypper \
+            --non-interactive \
+            addrepo \
+            --priority $repo_prio \
+            --refresh \
+            --no-gpgcheck \
+            $repo_url \
+            $repo_name
+    else
+        repo_name=$(echo $repo_spec | sed -e 's/\:.*$//')
+        repo_url=$(echo $repo_spec | sed -e 's/^.*\:\(http:.*$\)/\1/')
+        zypper \
+            --non-interactive \
+            addrepo \
+            --refresh \
+            --no-gpgcheck \
+            $repo_url \
+            $repo_name
+    fi
 done
 
 zypper --non-interactive --no-gpg-checks refresh

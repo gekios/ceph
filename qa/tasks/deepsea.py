@@ -1504,7 +1504,17 @@ class Repository(DeepSea):
     def _repositories_to_remote(self, remote):
         args = []
         for repo in self.repositories:
-            args += [repo['name'] + ':' + repo['url']]
+            if 'priority' in repo:
+                args += [str('\'') +
+                         str(repo['name']) +
+                         str('!') +
+                         str(repo['priority']) +
+                         str(':') +
+                         str(repo['url']) +
+                         str('\'')
+                         ]
+            else:
+                args += [repo['name'] + ':' + repo['url']]
         self.scripts.run(
             remote,
             'clobber_repositories.sh',
