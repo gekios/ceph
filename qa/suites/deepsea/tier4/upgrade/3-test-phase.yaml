@@ -1,16 +1,10 @@
 tasks:
         - exec:
                 client.salt_master:
-                        - 'ceph --version'
-                        - 'ceph -s'
+                        - 'ceph --version || true'
+                        - 'ceph -s || true'
         - deepsea.repository:
                 client.salt_master:
-        - exec:
-                client.salt_master:
-                        - 'zypper --non-interactive --no-gpg-checks rm gvfs-backends sle-sdk-release-POOL || true'
-        - exec:
-                client.salt_master:
-                        - 'zypper --non-interactive --no-gpg-checks dup --auto-agree-with-licenses --replacefiles'
         - deepsea.reboot:
                 client.salt_master:
         - deepsea:
@@ -19,22 +13,13 @@ tasks:
                 client.salt_master:
                         - 'deepsea --version || true'
                         - 'salt-run deepsea.version || true'
+                        - 'ceph --version || true'
+                        - 'ceph -s || true'
         - deepsea.repository:
-                all:
-        - exec:
-                all:
-                        - 'zypper --non-interactive --no-gpg-checks rm gvfs-backends sle-sdk-release-POOL || true'
-        - salt.command:
-                command: 'state.apply ceph.updates.salt'
-        - salt.command:
-                command: 'cmd.shell zypper -n in -f --from ses --force-resolution salt'
-        - salt.command:
-                command: 'cmd.shell rpm -qa | grep salt'
-        - salt.command:
-                command: 'saltutil.sync_all'
-        - deepsea.orch:
-                state_orch: ceph.maintenance.upgrade
+                mon.a:
+        - deepsea.reboot:
+                mon.a:
         - exec:
                 client.salt_master:
-                        - 'ceph --version'
-                        - 'ceph -s'
+                        - 'ceph --version || true'
+                        - 'ceph -s || true'
