@@ -1,5 +1,16 @@
 tasks:
-        - deepsea.create_pools:
-                cephfs:
-        - deepsea.orch:
-                stage: 4
+- deepsea.create_pools:
+        cephfs:
+        iscsi_images:
+- deepsea.orch:
+        stage: 4
+- exec:
+        client.salt_master:
+                - 'ceph --version || true'
+                - 'ceph -s || true'
+- deepsea.validation:
+                iscsi_smoke_test:
+- deepsea.health_ok:
+        commands:
+                - health-ok.sh --client-nodes=1 --mds --min-nodes=2 --nfs-ganesha
+                 

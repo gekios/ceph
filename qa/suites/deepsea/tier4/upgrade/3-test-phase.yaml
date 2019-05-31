@@ -1,40 +1,116 @@
 tasks:
-        - exec:
-                client.salt_master:
-                        - 'ceph --version'
-                        - 'ceph -s'
-        - deepsea.repository:
-                client.salt_master:
-        - exec:
-                client.salt_master:
-                        - 'zypper --non-interactive --no-gpg-checks rm gvfs-backends sle-sdk-release-POOL || true'
-        - exec:
-                client.salt_master:
-                        - 'zypper --non-interactive --no-gpg-checks dup --auto-agree-with-licenses --replacefiles'
-        - deepsea.reboot:
-                client.salt_master:
-        - deepsea:
-                upgrade_install: package
-        - exec:
-                client.salt_master:
-                        - 'deepsea --version || true'
-                        - 'salt-run deepsea.version || true'
-        - deepsea.repository:
-                all:
-        - exec:
-                all:
-                        - 'zypper --non-interactive --no-gpg-checks rm gvfs-backends sle-sdk-release-POOL || true'
-        - salt.command:
-                command: 'state.apply ceph.updates.salt'
-        - salt.command:
-                command: 'cmd.shell zypper -n in -f --from ses --force-resolution salt'
-        - salt.command:
-                command: 'cmd.shell rpm -qa | grep salt'
-        - salt.command:
-                command: 'saltutil.sync_all'
-        - deepsea.orch:
-                state_orch: ceph.maintenance.upgrade
-        - exec:
-                client.salt_master:
-                        - 'ceph --version'
-                        - 'ceph -s'
+- print: "Upgrading Salt Master (DeepSea) node from SES5 to SES6"
+- exec:
+        client.salt_master:
+                - 'echo "Salt Master node, pre-upgrade"'
+                - 'cat /etc/os-release'
+- deepsea.install_migration_rpm:
+- deepsea.repository:
+        client.salt_master:
+- deepsea.reboot:
+        client.salt_master:
+            tries: 300
+- deepsea.toolbox:
+        post_upgrade_status_checks:
+            client.salt_master:
+- print: "Salt Master (DeepSea) node upgraded to SES6"
+- exec:
+        client.salt_master:
+                - 'deepsea --version || true'
+                - 'salt-run deepsea.version 2>/dev/null || true'
+                - 'salt-run status.report 2>/dev/null'
+- print: "Upgrading first cluster node (MON+MGR+OSD) from SES5 to SES6"
+- exec:
+        osd.0:
+                - 'ceph --version || true'
+                - 'ceph -s || true'
+- deepsea.toolbox:
+        add_noout:
+                osd.0:
+- exec:
+        osd.0:
+                - 'ceph-volume simple scan --force'
+- deepsea.repository:
+        osd.0:
+- deepsea.reboot:
+        osd.0:
+            tries: 300
+- deepsea.toolbox:
+        post_upgrade_status_checks:
+            osd.0:
+- exec:
+        osd.0:
+                - 'ceph-volume simple activate --all'
+- print: "First cluster node (MON+MGR+OSD) upgraded to SES6"
+- deepsea.toolbox:
+        rm_noout:
+                osd.0:
+- exec:
+        client.salt_master:
+                - 'salt-run status.report 2>/dev/null'
+- deepsea.toolbox:
+        wait_for_health_ok:
+- print: "Upgrading second cluster node (OSD-only) from SES5 to SES6"
+- deepsea.toolbox:
+        add_noout:
+                osd.1:
+- exec:
+        osd.1:
+                - 'ceph-volume simple scan --force'
+- deepsea.repository:
+        osd.1:
+- deepsea.reboot:
+        osd.1:
+             tries: 300
+- deepsea.toolbox:
+        post_upgrade_status_checks:
+            osd.1:
+- print: "Second cluster node (OSD-only) upgraded to SES6"
+- exec:
+        osd.1:
+                - 'ceph-volume simple activate --all'
+- deepsea.toolbox:
+        rm_noout:
+                osd.1:
+- exec:
+        client.salt_master:
+                - 'salt-run status.report 2>/dev/null'
+                - "echo 'All nodes should now be running nautilus'"
+- deepsea.toolbox:
+        wait_for_health_ok:
+- exec:
+        client.salt_master:
+                - 'ceph osd require-osd-release nautilus'
+                - "salt '*' saltutil.sync_all 2>/dev/null"
+- deepsea.policy:
+        munge_profile:
+                post_upgrade_policy:
+- deepsea.orch:
+        stage: 1
+- deepsea.orch:
+        stage: 2
+- deepsea.toolbox:
+        remove_openattic:
+- exec:
+        client.salt_master:
+                - "salt '*' grains.delkey restart_igw 2>/dev/null"
+- deepsea.orch:
+        stage: 0
+- deepsea.orch:
+        stage: 1
+- deepsea.orch:
+        stage: 2
+- deepsea.orch:
+        stage: 3
+- deepsea.orch:
+        stage: 4
+- exec:
+        client.salt_master:
+                - 'ceph -s'
+- deepsea.validation:
+        iscsi_smoke_test:
+                --upgrade:
+- deepsea.toolbox:
+        cephfs_sanity_test:
+- deepsea.toolbox:
+        ganesha_sanity_test:

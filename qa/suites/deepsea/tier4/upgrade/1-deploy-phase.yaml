@@ -1,1 +1,15 @@
-.qa/deepsea/deepsea.yaml
+tasks:
+        - deepsea:
+                storage_profile: default
+        - deepsea.orch:
+                stage: prep
+        - deepsea.orch:
+                stage: 1
+        - deepsea.policy:
+        - deepsea.orch:
+                stage: 2
+        - deepsea.ceph_conf:
+                global:
+                        bluestore warn on legacy statfs: false
+        - deepsea.orch:
+                stage: 3
