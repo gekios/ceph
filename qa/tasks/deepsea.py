@@ -861,6 +861,57 @@ class HealthOK(DeepSea):
         pass
 
 
+class InstallMigrationRPM(DeepSea):
+
+    err_prefix = "(install_migration_rpm subtask) "
+
+    rpm_location = "http://download.suse.de/ibs/Devel:/Storage:/5.0:/Testing/images/x86_64/"
+
+    rpm_name = "SLES15-Migration"
+
+    def __init__(self, ctx, config):
+        global deepsea_ctx
+        deepsea_ctx['logger_obj'] = log.getChild('install_migration_rpm')
+        self.name = 'deepsea.install_migration_rpm'
+        super(InstallMigrationRPM, self).__init__(ctx, config)
+        if not isinstance(self.config, dict):
+            raise ConfigError(self.err_prefix + "config must be a dictionary")
+
+    def _install_lynx_on_teuthology_server(self):
+        misc.sh("sudo apt-get -y update && sudo apt-get --yes install lynx")
+        misc.sh("type lynx")
+
+    def _migration_rpm_url(self):
+        """Given the location and name of the migration RPM, determine the URL"""
+        cmd = ("lynx --dump -listonly {url} ".format(url=self.rpm_location) +
+               "| awk '{print $2}' " +
+               "| grep {name}.*.rpm$ ".format(name=self.rpm_name) +
+               "| uniq"
+               )
+        retval = misc.sh(cmd).rstrip()
+        if not retval:
+            raise ConfigError(
+                self.err_prefix + "command ->{}<- produced no output".format(cmd)
+                )
+        return retval
+
+    def begin(self):
+        self._install_lynx_on_teuthology_server()
+        self.log.info(anchored("installing migration RPM {} from location {} on all nodes"
+                      .format(self.rpm_name, self.rpm_location)))
+        self.scripts.run(
+            self.ctx.cluster,
+            'install_migration_rpm.sh',
+            args=[self._migration_rpm_url(), self.rpm_name],
+            )
+
+    def end(self):
+        pass
+
+    def teardown(self):
+        pass
+
+
 class Orch(DeepSea):
 
     all_stages = [
@@ -1773,6 +1824,7 @@ ceph_conf = CephConf
 create_pools = CreatePools
 dummy = Dummy
 health_ok = HealthOK
+install_migration_rpm = InstallMigrationRPM
 orch = Orch
 policy = Policy
 reboot = Reboot
