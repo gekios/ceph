@@ -1,25 +1,34 @@
 tasks:
-        - exec:
-                client.salt_master:
-                        - 'ceph --version || true'
-                        - 'ceph -s || true'
-        - deepsea.repository:
-                client.salt_master:
-        - deepsea.reboot:
-                client.salt_master:
-        - deepsea:
-                upgrade_install: package
-        - exec:
-                client.salt_master:
-                        - 'deepsea --version || true'
-                        - 'salt-run deepsea.version || true'
-                        - 'ceph --version || true'
-                        - 'ceph -s || true'
-        - deepsea.repository:
-                mon.a:
-        - deepsea.reboot:
-                mon.a:
-        - exec:
-                client.salt_master:
-                        - 'ceph --version || true'
-                        - 'ceph -s || true'
+- deepsea:
+        storage_profile: default
+- exec:
+        client.salt_master:
+                - 'echo "Salt Master node, pre-upgrade"'
+                - 'cat /etc/os-release'
+- deepsea.install_migration_rpm:
+- deepsea.repository:
+        client.salt_master:
+- deepsea.reboot:
+        client.salt_master:
+- exec:
+        client.salt_master:
+                - 'echo "Salt Master node, post-upgrade"'
+                - 'cat /etc/os-release'
+                - 'cat /etc/issue'
+                - 'cat /var/log/distro_migration.log || true'
+- deepsea:
+        upgrade_install: package
+- exec:
+        client.salt_master:
+                - 'deepsea --version || true'
+                - 'salt-run deepsea.version || true'
+                - 'ceph --version || true'
+                - 'ceph -s || true'
+#- deepsea.repository:
+#        mon.a:
+#- deepsea.reboot:
+#        mon.a:
+#- exec:
+#        client.salt_master:
+#                - 'ceph --version || true'
+#                - 'ceph -s || true'
