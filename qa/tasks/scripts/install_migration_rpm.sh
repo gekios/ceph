@@ -22,4 +22,11 @@ function zypper_install {
 
 zypper_install $RPM
 zypper_install suse-migration-sle15-activation
+
+SLE_MIGRATION_YML="/etc/sle-migration-service.yml"
+cat <<EOM > $SLE_MIGRATION_YML
+use_zypper_migration_plugin: false
+EOM
+
+cat $SLE_MIGRATION_YML
 exit 0
