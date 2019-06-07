@@ -449,10 +449,13 @@ class DeepSea(Task):
         os_version = float(self.ctx.config.get('os_version', 0))
         return (os_type, os_version)
 
-    def reboot_a_single_machine_now(self, remote, log_spec=None):
+    def reboot_a_single_machine_now(self, remote, log_spec=None, tries=None):
         global reboot_tries
+        if tries is None:
+            tries = reboot_tries
         if not log_spec:
-            log_spec = "node {} reboot now".format(remote.hostname)
+            log_spec = ("node {} reboot now, trying up to {} times"
+                        .format(remote.hostname, tries))
         cmd_str = "sudo reboot"
         remote_exec(
             remote,
@@ -461,13 +464,15 @@ class DeepSea(Task):
             log_spec,
             rerun=False,
             quiet=True,
-            tries=reboot_tries,
+            tries=tries,
             )
 
-    def reboot_the_cluster_now(self, log_spec=None):
+    def reboot_the_cluster_now(self, log_spec=None, tries=None):
         global reboot_tries
+        if tries is None:
+            tries = reboot_tries
         if not log_spec:
-            log_spec = "all nodes reboot now"
+            log_spec = "all nodes reboot now, trying up to {} times"
         cmd_str = "salt \\* cmd.run reboot"
         if self.quiet_salt:
             cmd_str += " 2> /dev/null"
@@ -478,7 +483,7 @@ class DeepSea(Task):
             log_spec,
             rerun=False,
             quiet=True,
-            tries=reboot_tries,
+            tries=tries,
             )
         self.sm.ping_minions()
 
@@ -1458,6 +1463,18 @@ class Reboot(DeepSea):
     tasks:
     - deepsea.reboot:
           all:
+
+    By default, teuthology polls (via SSH) for the machine to come back from
+    reboot a maximum of 15 times, once per minute. In some cases, this might
+    not be enough. In such a case, use the "tries" parameter:
+
+    tasks:
+    - deepsea.reboot:
+          foo.1:
+              tries: 60
+
+    This would poll for the machine to come back one per minute for up to 60
+    minutes.
     """
 
     err_prefix = '(reboot subtask) '
@@ -1469,27 +1486,48 @@ class Reboot(DeepSea):
         super(Reboot, self).__init__(ctx, config)
 
     def begin(self):
+        global reboot_tries
         if not self.config:
             self.log.warning("empty config: nothing to do")
             return None
+        self.log.info("Considering config dict ->{}<-".format(self.config))
         config_keys = len(self.config)
         if config_keys > 1:
             raise ConfigError(
                 self.err_prefix +
                 "config dictionary may contain only one key. "
-                "You provided ->{}<- keys ({})".format(len(config_keys), config_keys)
+                "You provided ->{}<- keys".format(config_keys)
                 )
-        role_spec, repositories = self.config.items()[0]
+        role_spec, paramdict = self.config.items()[0]
+        paramdict_keys = len(paramdict)
+        if paramdict_keys >= 1:
+            self.log.info("Considering parameter dict {}".format(paramdict))
+            if paramdict_keys > 1:
+                raise ConfigError(
+                    self.err_prefix +
+                    "parameter dict may contain only one key. "
+                    "You provided ->{}<- keys".format(paramdict_keys)
+                    )
+            tries, tries_num = paramdict.items()[0]
+            if tries != 'tries':
+                raise ConfigError(
+                    self.err_prefix +
+                    "The parameter dict only supports one key: \"tries\""
+                    "But you provided an unknown key ->{}<-".format(tries)
+                    )
+            tries_num = int(tries_num)
+        else:
+            tries_num = reboot_tries
         if role_spec == "all":
             remote = self.ctx.cluster
             log_spec = "all nodes reboot now"
             self.log.warning(anchored(log_spec))
-            self.reboot_the_cluster_now(log_spec=log_spec)
+            self.reboot_the_cluster_now(log_spec=log_spec, tries=tries_num)
         else:
             remote = get_remote_for_role(self.ctx, role_spec)
             log_spec = "node {} reboot now".format(remote.hostname)
             self.log.warning(anchored(log_spec))
-            self.reboot_a_single_machine_now(remote, log_spec=log_spec)
+            self.reboot_a_single_machine_now(remote, log_spec=log_spec, tries=tries_num)
 
     def end(self):
         pass
@@ -1576,6 +1614,7 @@ class Repository(DeepSea):
         if not self.config:
             self.log.warning("empty config: nothing to do")
             return None
+        self.log.info("Considering config dict ->{}<-".format(self.config))
         config_keys = len(self.config)
         if config_keys > 1:
             raise ConfigError(
@@ -1643,6 +1682,7 @@ class Script(DeepSea):
         if not self.config:
             self.log.warning("empty config: nothing to do")
             return None
+        self.log.info("Considering config dict {}".format(self.config))
         config_keys = len(self.config)
         if config_keys > 1:
             raise ConfigError(
