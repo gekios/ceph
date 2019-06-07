@@ -203,9 +203,10 @@ def remote_exec(remote, cmd_str, logger, log_spec, quiet=True, rerun=False, trie
     already_rebooted_at_least_once = False
     if tries:
         remote.run(args="uptime")
-        logger.info("Running command ->{}<- on {}. "
-                    "This might cause the machine to reboot!"
-                    .format(cmd_str, remote.hostname))
+        logger.info("Running command ->{}<- on {}. This might cause the machine to reboot! "
+                    "In that case, will try to reconnect once per minute for up to {} minutes."
+                    .format(cmd_str, remote.hostname, tries))
+    counter = 0
     with safe_while(sleep=60, tries=tries, action="wait for reconnect") as proceed:
         while proceed():
             try:
@@ -224,7 +225,8 @@ def remote_exec(remote, cmd_str, logger, log_spec, quiet=True, rerun=False, trie
                 already_rebooted_at_least_once = True
                 if tries < 1:
                     raise
-                logger.warning("No connection established yet..")
+                counter += 1
+                logger.warning("WWWW: No connection established yet... ({})".format(counter))
 
 
 def remote_run_script_as_root(remote, path, data, args=None):
