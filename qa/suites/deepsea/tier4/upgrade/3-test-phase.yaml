@@ -16,6 +16,7 @@ tasks:
                 - 'cat /etc/os-release'
                 - 'cat /etc/issue'
                 - 'cat /var/log/distro_migration.log || true'
+                - 'zypper packages --orphaned'
 - deepsea:
         upgrade_install: package
 - exec:
