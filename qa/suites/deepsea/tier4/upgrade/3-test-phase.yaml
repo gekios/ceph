@@ -8,7 +8,7 @@ tasks:
         client.salt_master:
 - deepsea.reboot:
         client.salt_master:
-            tries: 60
+            tries: 90
 - exec:
         client.salt_master:
                 - 'echo "Salt Master node, post-upgrade"'
@@ -18,13 +18,19 @@ tasks:
                 - 'zypper packages --orphaned'
                 - 'deepsea --version || true'
                 - 'salt-run deepsea.version 2>/dev/null || true'
+- exec:
+        mon.a:
                 - 'ceph --version || true'
                 - 'ceph -s || true'
+                - 'ceph-volume simple scan --force'
 - deepsea.repository:
         mon.a:
 - deepsea.reboot:
         mon.a:
-            tries: 60
+            tries: 90
+- exec:
+        mon.a:
+                - 'ceph-volume simple activate --all'
 - exec:
         client.salt_master:
                 - 'ceph --version || true'
