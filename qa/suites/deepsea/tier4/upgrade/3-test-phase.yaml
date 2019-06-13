@@ -1,6 +1,4 @@
 tasks:
-- deepsea:
-        storage_profile: default
 - exec:
         client.salt_master:
                 - 'echo "Salt Master node, pre-upgrade"'
@@ -18,20 +16,16 @@ tasks:
                 - 'cat /etc/issue'
                 - 'cat /var/log/distro_migration.log || true'
                 - 'zypper packages --orphaned'
-- deepsea:
-        upgrade_install: package
-- exec:
-        client.salt_master:
                 - 'deepsea --version || true'
-                - 'salt-run deepsea.version || true'
+                - 'salt-run deepsea.version 2>/dev/null || true'
                 - 'ceph --version || true'
                 - 'ceph -s || true'
-#- deepsea.repository:
-#        mon.a:
-#- deepsea.reboot:
-#        mon.a:
-#            tries: 60
-#- exec:
-#        client.salt_master:
-#                - 'ceph --version || true'
-#                - 'ceph -s || true'
+- deepsea.repository:
+        mon.a:
+- deepsea.reboot:
+        mon.a:
+            tries: 60
+- exec:
+        client.salt_master:
+                - 'ceph --version || true'
+                - 'ceph -s || true'
