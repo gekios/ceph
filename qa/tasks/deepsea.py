@@ -139,6 +139,7 @@ class DeepSea(Task):
                         '--no-gpg-checks',
                         'remove',
                         'deepsea',
+                        'deepsea-cli',
                         'deepsea-qa',
                         run.Raw('||'),
                         'true'
