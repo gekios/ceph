@@ -4,6 +4,7 @@ Task (and subtasks) for automating deployment of Ceph using DeepSea
 Linter:
     flake8 --max-line-length=100
 """
+import json
 import logging
 import yaml
 
@@ -1728,6 +1729,88 @@ class Script(DeepSea):
         pass
 
 
+class Toolbox(DeepSea):
+    """
+    A class that contains various miscellaneous routines. For example:
+
+    tasks:
+    - deepsea.toolbox:
+          foo:
+
+    Runs the "foo" tool without any options.
+    """
+
+    err_prefix = '(toolbox subtask) '
+
+    def __init__(self, ctx, config):
+        global deepsea_ctx
+        deepsea_ctx['logger_obj'] = log.getChild('toolbox')
+        self.name = 'deepsea.toolbox'
+        super(Toolbox, self).__init__(ctx, config)
+
+    def _noout(self, add_or_rm, teuth_role):
+        """
+        add_or_rm is either 'add' or 'rm'
+        teuth_role is an 'osd' role uniquely specifying one of the storage nodes.
+        Enumerates the OSDs on the node and does 'add-noout' on each of them.
+        """
+        remote = get_remote_for_role(self.ctx, teuth_role)
+        hostname = remote.hostname
+        self.log.info("Running {}-noout for OSDs on {}".format(add_or_rm, hostname))
+        cmd = ("sudo ceph osd tree -f json | "
+               "jq -c '[.nodes[] | select(.name == \"{}\")][0].children'"
+               .format(hostname.rstrip(".teuthology")))
+        osds = json.loads(remote.sh(cmd))
+        self.log.info("Running {}-noout for OSDs ->{}<-".format(add_or_rm, osds))
+        for osd in osds:
+            remote.sh("sudo ceph osd {}-noout osd.{}".format(add_or_rm, osd))
+
+    def add_noout(self, **kwargs):
+        """
+        Expects one key - a teuthology 'osd' role specifying one of the storage nodes.
+        Enumerates the OSDs on this node and does 'add-noout' on each of them.
+        """
+        role = kwargs.keys()[0]
+        self._noout("add", role)
+
+    def rm_noout(self, **kwargs):
+        """
+        Expects one key - a teuthology 'osd' role specifying one of the storage nodes.
+        Enumerates the OSDs on this node and does 'rm-noout' on each of them.
+        """
+        role = kwargs.keys()[0]
+        self._noout("rm", role)
+
+    def begin(self):
+        if not self.config:
+            self.log.warning("empty config: nothing to do")
+            return None
+        self.log.info("Considering config dict ->{}<-".format(self.config))
+        config_keys = len(self.config)
+        if config_keys > 1:
+            raise ConfigError(
+                self.err_prefix +
+                "config dictionary may contain only one key. "
+                "You provided ->{}<- keys ({})".format(len(config_keys), config_keys)
+                )
+        tool_spec, kwargs = self.config.items()[0]
+        kwargs = {} if not kwargs else kwargs
+        method = getattr(self, tool_spec, None)
+        if method:
+            self.log.info("About to run tool ->{}<- from toolbox with config ->{}<-"
+                          .format(tool_spec, kwargs))
+            method(**kwargs)
+        else:
+            raise ConfigError(self.err_prefix + "No such tool ->{}<- in toolbox"
+                              .format(tool_spec))
+
+    def end(self):
+        pass
+
+    def teardown(self):
+        pass
+
+
 class Validation(DeepSea):
     """
     A container for "validation tests", which are understood to mean tests that
@@ -1871,4 +1954,5 @@ policy = Policy
 reboot = Reboot
 repository = Repository
 script = Script
+toolbox = Toolbox
 validation = Validation
