@@ -22,6 +22,11 @@ tasks:
         mon.a:
                 - 'ceph --version || true'
                 - 'ceph -s || true'
+- deepsea.toolbox:
+        add_noout:
+                osd.0:
+- exec:
+        osd.0:
                 - 'ceph-volume simple scan --force'
 - deepsea.repository:
         mon.a:
@@ -31,6 +36,9 @@ tasks:
 - exec:
         mon.a:
                 - 'ceph-volume simple activate --all'
+- deepsea.toolbox:
+        rm_noout:
+                osd.0:
 - exec:
         client.salt_master:
                 - 'ceph --version || true'
