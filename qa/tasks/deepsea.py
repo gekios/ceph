@@ -877,7 +877,8 @@ class InstallMigrationRPM(DeepSea):
 
     err_prefix = "(install_migration_rpm subtask) "
 
-    rpm_location = "http://download.suse.de/ibs/Devel:/Storage:/5.0:/Testing/images/x86_64/"
+    # rpm_location = "http://download.suse.de/ibs/Devel:/Storage:/5.0:/Testing/images/x86_64/"
+    rpm_location = "http://51.68.80.25/artifacts/ci/smithfarm:Devel:Storage:5.0:Testing-images/x86_64/"
 
     rpm_name = "SLES15-Migration"
 
