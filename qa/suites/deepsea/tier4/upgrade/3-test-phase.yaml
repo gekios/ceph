@@ -41,5 +41,7 @@ tasks:
                 osd.0:
 - exec:
         client.salt_master:
-                - 'ceph --version || true'
                 - 'ceph -s || true'
+                - 'salt-run status.report'
+- deepsea.toolbox:
+        ceph_health_test:
