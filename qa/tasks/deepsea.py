@@ -39,6 +39,11 @@ def anchored(log_message):
     return "{}{}".format(deepsea_ctx['log_anchor'], log_message)
 
 
+def ceph_health_test(master_remote):
+    cmd = 'sudo salt-call wait.until status=HEALTH_OK timeout=900 check=1 2> /dev/null'
+    master_remote.run(args=cmd)
+
+
 def dump_file_that_might_not_exist(remote, fpath):
     try:
         remote.run(args="cat {}".format(fpath))
@@ -961,10 +966,7 @@ class Orch(DeepSea):
         self.log.debug("munged config is {}".format(self.config))
 
     def __ceph_health_test(self):
-        cmd = 'sudo salt-call wait.until status=HEALTH_OK timeout=900 check=1'
-        if self.quiet_salt:
-            cmd += ' 2> /dev/null'
-        self.master_remote.run(args=cmd)
+        ceph_health_test(self.master_remote)
 
     def __check_salt_api_service(self):
         base_cmd = 'sudo systemctl status --full --lines={} {}.service'
@@ -1772,6 +1774,9 @@ class Toolbox(DeepSea):
         """
         role = kwargs.keys()[0]
         self._noout("add", role)
+
+    def ceph_health_test(self, **kwargs):
+        ceph_health_test(self.master_remote)
 
     def rm_noout(self, **kwargs):
         """
