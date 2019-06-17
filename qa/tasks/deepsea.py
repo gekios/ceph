@@ -878,7 +878,8 @@ class InstallMigrationRPM(DeepSea):
     err_prefix = "(install_migration_rpm subtask) "
 
     # rpm_location = "http://download.suse.de/ibs/Devel:/Storage:/5.0:/Testing/images/x86_64/"
-    rpm_location = "http://51.68.80.25/artifacts/ci/smithfarm:Devel:Storage:5.0:Testing-images/x86_64/"
+    rpm_location = ("http://51.68.80.25/artifacts/ci/"
+                    "smithfarm:Devel:Storage:5.0:Testing-images/x86_64/")
 
     rpm_name = "SLES15-Migration"
 
@@ -1778,6 +1779,34 @@ class Toolbox(DeepSea):
 
     def ceph_health_test(self, **kwargs):
         ceph_health_test(self.master_remote)
+
+    def post_upgrade_status_checks(self, **kwargs):
+        """
+        Takes a config dict with a single key containing a teuthology role,
+        which we use to get the remote object of the node that was just upgraded.
+        """
+        if not kwargs:
+            self.log.warning("post_upgrade_status_checks got empty config: nothing to do")
+            return None
+        self.log.info("post_upgrade_status_checks: Considering config dict ->{}<-".format(kwargs))
+        config_keys = len(kwargs)
+        if config_keys > 1:
+            raise ConfigError(
+                self.err_prefix +
+                "post_upgrade_status_checks config dictionary may contain only one key. "
+                "You provided ->{}<- keys ({})".format(len(config_keys), config_keys)
+                )
+        role_spec, throwaway = kwargs.items()[0]
+        remote = get_remote_for_role(self.ctx, role_spec)
+        self.log.info("Teuthology role {} is {}".format(role_spec, remote.hostname))
+        remote.sh('cat /etc/os-release')
+        etc_issue = remote.sh('cat /etc/issue')
+        if "Migration has failed" in etc_issue:
+            self.log.error("Migration of node {} failed: here comes the log!"
+                           .format(remote.hostname))
+            remote.sh('cat /var/log/distro_migration.log')
+            raise RuntimeError("Migration of node {} failed".format(remote.hostname))
+        remote.sh('zypper packages --orphaned')
 
     def rm_noout(self, **kwargs):
         """
