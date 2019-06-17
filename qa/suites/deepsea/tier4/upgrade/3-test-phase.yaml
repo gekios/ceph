@@ -9,15 +9,14 @@ tasks:
 - deepsea.reboot:
         client.salt_master:
             tries: 90
+- deepsea.toolbox:
+        post_upgrade_status_checks:
+            client.salt_master:
 - exec:
         client.salt_master:
-                - 'echo "Salt Master node, post-upgrade"'
-                - 'cat /etc/os-release'
-                - 'cat /etc/issue'
-                - 'cat /var/log/distro_migration.log || true'
-                - 'zypper packages --orphaned'
                 - 'deepsea --version || true'
                 - 'salt-run deepsea.version 2>/dev/null || true'
+                - 'salt-run status.report 2>/dev/null'
 - exec:
         mon.a:
                 - 'ceph --version || true'
@@ -42,6 +41,6 @@ tasks:
 - exec:
         client.salt_master:
                 - 'ceph -s || true'
-                - 'salt-run status.report'
+                - 'salt-run status.report 2>/dev/null'
 - deepsea.toolbox:
         ceph_health_test:
