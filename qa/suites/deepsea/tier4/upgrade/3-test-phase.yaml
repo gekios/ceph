@@ -32,6 +32,9 @@ tasks:
 - deepsea.reboot:
         mon.a:
             tries: 90
+- deepsea.toolbox:
+        post_upgrade_status_checks:
+            mon.a:
 - exec:
         mon.a:
                 - 'ceph-volume simple activate --all'
@@ -40,7 +43,31 @@ tasks:
                 osd.0:
 - exec:
         client.salt_master:
-                - 'ceph -s || true'
                 - 'salt-run status.report 2>/dev/null'
 - deepsea.toolbox:
-        ceph_health_test:
+        wait_for_health_ok:
+- deepsea.toolbox:
+        add_noout:
+                osd.1:
+- exec:
+        osd.1:
+                - 'ceph-volume simple scan --force'
+- deepsea.repository:
+        osd.1:
+- deepsea.reboot:
+        osd.1:
+             tries: 90
+- deepsea.toolbox:
+        post_upgrade_status_checks:
+            osd.1:
+- exec:
+        osd.1:
+                - 'ceph-volume simple activate --all'
+- deepsea.toolbox:
+        rm_noout:
+                osd.1:
+- exec:
+        client.salt_master:
+                - 'salt-run status.report 2>/dev/null'
+- deepsea.toolbox:
+        wait_for_health_ok:
