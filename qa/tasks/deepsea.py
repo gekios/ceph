@@ -6,6 +6,7 @@ Linter:
 """
 import json
 import logging
+import time
 import yaml
 
 from salt_manager import SaltManager
@@ -1815,6 +1816,50 @@ class Toolbox(DeepSea):
         """
         role = kwargs.keys()[0]
         self._noout("rm", role)
+
+    def wait_for_health_ok(self, **kwargs):
+        """
+        Wait for HEALTH_OK - stop after HEALTH_OK is reached or timeout expires.
+        Timeout defaults to 120 minutes, but can be specified by providing a
+        configuration option. For example:
+
+        tasks:
+        - deepsea.toolbox
+            wait_for_health_ok:
+              timeout_minutes: 90
+        """
+        if kwargs:
+            self.log.info("wait_for_health_ok: Considering config dict ->{}<-".format(kwargs))
+            config_keys = len(kwargs)
+            if config_keys > 1:
+                raise ConfigError(
+                    self.err_prefix +
+                    "wait_for_health_ok config dictionary may contain only one key. "
+                    "You provided ->{}<- keys ({})".format(len(config_keys), config_keys)
+                    )
+            timeout_spec, timeout_minutes = kwargs.items()[0]
+        else:
+            timeout_minutes = 120
+        self.log.info("Waiting up to ->{}<- minutes for HEALTH_OK".format(timeout_minutes))
+        remote = get_remote_for_role(self.ctx, "client.salt_master")
+        cluster_status = ""
+        for minute in range(1, timeout_minutes+1):
+            remote.sh("sudo ceph status")
+            cluster_status = remote.sh(
+                "sudo ceph health detail --format json | jq -r '.status'"
+                ).rstrip()
+            if cluster_status == "HEALTH_OK":
+                break
+            self.log.info("Waiting for one minute for cluster to reach HEALTH_OK"
+                          "({} minutes left to timeout)"
+                          .format(timeout_minutes + 1 - minute))
+            time.sleep(60)
+        if cluster_status == "HEALTH_OK":
+            self.log.info(anchored("Cluster is healthy"))
+        else:
+            raise RuntimeError("Cluster still not healthy (current status ->{}<-) "
+                               "after reaching timeout"
+                               .format(cluster_status))
 
     def begin(self):
         if not self.config:
