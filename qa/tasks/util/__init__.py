@@ -226,7 +226,7 @@ def remote_exec(remote, cmd_str, logger, log_spec, quiet=True, rerun=False, trie
                 if tries < 1:
                     raise
                 counter += 1
-                logger.warning("WWWW: No connection established yet... ({})".format(counter))
+                logger.warning("No connection established yet... ({})".format(counter))
 
 
 def remote_run_script_as_root(remote, path, data, args=None):
