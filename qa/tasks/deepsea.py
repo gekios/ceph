@@ -474,6 +474,7 @@ class DeepSea(Task):
             quiet=True,
             tries=tries,
             )
+        self.log.info(anchored("node {} back from reboot".format(remote.hostname)))
 
     def reboot_the_cluster_now(self, log_spec=None, tries=None):
         global reboot_tries
@@ -494,6 +495,7 @@ class DeepSea(Task):
             tries=tries,
             )
         self.sm.ping_minions()
+        self.log.info(anchored("all cluster nodes back from reboot"))
 
     def role_type_present(self, role_type):
         """
