@@ -1,0 +1,14 @@
+tasks:
+        - deepsea.create_pools:
+                iscsi-images:
+        - deepsea.orch:
+                stage: 4
+        - exec:
+                client.salt_master:
+                        - 'ceph -s'
+        - deepsea.script:
+                client.salt_master:
+                        foo.sh:
+        - deepsea.script:
+                client.salt_master:
+                        bar.sh:
