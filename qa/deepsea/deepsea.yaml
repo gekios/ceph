@@ -1,7 +1,12 @@
 tasks:
         - deepsea:
                 allow_python2: false
-                drive_group: default
+                drive_group:
+                    custom:
+                        target: 'I@roles:storage'
+                        data_devices:
+                           all: true
+                        format: filestore
         - deepsea.orch:
                 stage: prep
         - deepsea.orch:

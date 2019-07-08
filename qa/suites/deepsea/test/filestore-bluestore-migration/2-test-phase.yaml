@@ -1,0 +1,7 @@
+tasks:
+        - deepsea.create_pools:
+                foo:     
+        - exec:
+                client.salt_master:
+                        - 'ceph -s'
+        - deepsea.validation:
