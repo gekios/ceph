@@ -16,13 +16,13 @@ tasks:
         - exec:
                 client.salt_master:
                         - 'cat /srv/salt/ceph/configuration/files/drive_groups.yml'
-        - deepsea.toolbox:
-                rebuild_node:
-                        osd.0:
-        - exec:
-                client.salt_master:
-                        - 'ceph -s'
-        - deepsea.toolbox:
-                assert_bluestore:
-                        osd.0:
-        - deepsea.validation:
+                          #        - deepsea.toolbox:
+                          #                rebuild_node:
+                          #                        osd.0:
+                          #        - exec:
+                          #                client.salt_master:
+                          #                        - 'ceph -s'
+                          #        - deepsea.toolbox:
+                          #                assert_bluestore:
+                          #                        osd.0:
+                          #        - deepsea.validation:
