@@ -381,6 +381,7 @@ void osd_stat_t::dump(Formatter *f) const
   f->close_section();
   f->dump_int("snap_trim_queue_len", snap_trim_queue_len);
   f->dump_int("num_snap_trimming", num_snap_trimming);
+  f->dump_int("num_shards_repaired", num_shards_repaired);
   f->open_object_section("op_queue_age_hist");
   op_queue_age_hist.dump(f);
   f->close_section();
@@ -394,7 +395,7 @@ void osd_stat_t::dump(Formatter *f) const
 
 void osd_stat_t::encode(bufferlist &bl, uint64_t features) const
 {
-  ENCODE_START(10, 2, bl);
+  ENCODE_START(11, 2, bl);
 
   //////// for compatibility ////////
   int64_t kb = statfs.kb();
@@ -425,6 +426,7 @@ void osd_stat_t::encode(bufferlist &bl, uint64_t features) const
   encode(statfs, bl);
   ///////////////////////////////////
   encode(os_alerts, bl);
+  encode(num_shards_repaired, bl);
   ENCODE_FINISH(bl);
 }
 
@@ -432,7 +434,7 @@ void osd_stat_t::decode(bufferlist::const_iterator &bl)
 {
   int64_t kb, kb_used,kb_avail;
   int64_t kb_used_data, kb_used_omap, kb_used_meta;
-  DECODE_START_LEGACY_COMPAT_LEN(10, 2, 2, bl);
+  DECODE_START_LEGACY_COMPAT_LEN(11, 2, 2, bl);
   decode(kb, bl);
   decode(kb_used, bl);
   decode(kb_avail, bl);
@@ -487,6 +489,11 @@ void osd_stat_t::decode(bufferlist::const_iterator &bl)
   } else {
     os_alerts.clear();
   }
+  if (struct_v >= 11) {
+    decode(num_shards_repaired, bl);
+  } else {
+    num_shards_repaired = 0;
+  }
   DECODE_FINISH(bl);
 }
 
@@ -501,6 +508,7 @@ void osd_stat_t::generate_test_instances(std::list<osd_stat_t*>& o)
   o.back()->hb_peers.push_back(7);
   o.back()->snap_trim_queue_len = 8;
   o.back()->num_snap_trimming = 99;
+  o.back()->num_shards_repaired = 101;
   o.back()->os_alerts[0].emplace(
     "some alert", "some alert details");
   o.back()->os_alerts[1].emplace(
@@ -976,6 +984,8 @@ std::string pg_state_string(uint64_t state)
     oss << "snaptrim_wait+";
   if (state & PG_STATE_SNAPTRIM_ERROR)
     oss << "snaptrim_error+";
+  if (state & PG_STATE_FAILED_REPAIR)
+    oss << "failed_repair+";
   string ret(oss.str());
   if (ret.length() > 0)
     ret.resize(ret.length() - 1);
@@ -1047,6 +1057,8 @@ boost::optional<uint64_t> pg_string_state(const std::string& state)
     type = PG_STATE_SNAPTRIM_ERROR;
   else if (state == "creating")
     type = PG_STATE_CREATING;
+  else if (state == "failed_repair")
+    type = PG_STATE_FAILED_REPAIR;
   else if (state == "unknown")
     type = 0;
   else
@@ -1146,7 +1158,9 @@ static opt_mapping_t opt_mapping = boost::assign::map_list_of
            ("target_size_bytes", pool_opts_t::opt_desc_t(
 	     pool_opts_t::TARGET_SIZE_BYTES, pool_opts_t::INT))
            ("target_size_ratio", pool_opts_t::opt_desc_t(
-	     pool_opts_t::TARGET_SIZE_RATIO, pool_opts_t::DOUBLE));
+	     pool_opts_t::TARGET_SIZE_RATIO, pool_opts_t::DOUBLE))
+           ("pg_autoscale_bias", pool_opts_t::opt_desc_t(
+	     pool_opts_t::PG_AUTOSCALE_BIAS, pool_opts_t::DOUBLE));
 
 bool pool_opts_t::is_opt_name(const std::string& name)
 {
@@ -2225,11 +2239,12 @@ void object_stat_sum_t::dump(Formatter *f) const
   f->dump_int("num_objects_manifest", num_objects_manifest);
   f->dump_int("num_omap_bytes", num_omap_bytes);
   f->dump_int("num_omap_keys", num_omap_keys);
+  f->dump_int("num_objects_repaired", num_objects_repaired);
 }
 
 void object_stat_sum_t::encode(bufferlist& bl) const
 {
-  ENCODE_START(19, 14, bl);
+  ENCODE_START(20, 14, bl);
 #if defined(CEPH_LITTLE_ENDIAN)
   bl.append((char *)(&num_bytes), sizeof(object_stat_sum_t));
 #else
@@ -2272,6 +2287,7 @@ void object_stat_sum_t::encode(bufferlist& bl) const
   encode(num_objects_manifest, bl);
   encode(num_omap_bytes, bl);
   encode(num_omap_keys, bl);
+  encode(num_objects_repaired, bl);
 #endif
   ENCODE_FINISH(bl);
 }
@@ -2279,9 +2295,10 @@ void object_stat_sum_t::encode(bufferlist& bl) const
 void object_stat_sum_t::decode(bufferlist::const_iterator& bl)
 {
   bool decode_finish = false;
-  DECODE_START(19, bl);  // make sure to also update fast decode below
+  static const int STAT_SUM_DECODE_VERSION = 20;
+  DECODE_START(STAT_SUM_DECODE_VERSION, bl);
 #if defined(CEPH_LITTLE_ENDIAN)
-  if (struct_v >= 19) {  // this must match newest decode version
+  if (struct_v == STAT_SUM_DECODE_VERSION) {
     bl.copy(sizeof(object_stat_sum_t), (char*)(&num_bytes));
     decode_finish = true;
   }
@@ -2336,6 +2353,9 @@ void object_stat_sum_t::decode(bufferlist::const_iterator& bl)
       decode(num_omap_bytes, bl);
       decode(num_omap_keys, bl);
     }
+    if (struct_v >= 20) {
+      decode(num_objects_repaired, bl);
+    }
   }
   DECODE_FINISH(bl);
 }
@@ -2379,6 +2399,7 @@ void object_stat_sum_t::generate_test_instances(list<object_stat_sum_t*>& o)
   a.num_objects_manifest = 2;
   a.num_omap_bytes = 20000;
   a.num_omap_keys = 200;
+  a.num_objects_repaired = 300;
   o.push_back(new object_stat_sum_t(a));
 }
 
@@ -2423,6 +2444,7 @@ void object_stat_sum_t::add(const object_stat_sum_t& o)
   num_objects_manifest += o.num_objects_manifest;
   num_omap_bytes += o.num_omap_bytes;
   num_omap_keys += o.num_omap_keys;
+  num_objects_repaired += o.num_objects_repaired;
 }
 
 void object_stat_sum_t::sub(const object_stat_sum_t& o)
@@ -2466,6 +2488,7 @@ void object_stat_sum_t::sub(const object_stat_sum_t& o)
   num_objects_manifest -= o.num_objects_manifest;
   num_omap_bytes -= o.num_omap_bytes;
   num_omap_keys -= o.num_omap_keys;
+  num_objects_repaired -= o.num_objects_repaired;
 }
 
 bool operator==(const object_stat_sum_t& l, const object_stat_sum_t& r)
@@ -2509,7 +2532,8 @@ bool operator==(const object_stat_sum_t& l, const object_stat_sum_t& r)
     l.num_large_omap_objects == r.num_large_omap_objects &&
     l.num_objects_manifest == r.num_objects_manifest &&
     l.num_omap_bytes == r.num_omap_bytes &&
-    l.num_omap_keys == r.num_omap_keys;
+    l.num_omap_keys == r.num_omap_keys &&
+    l.num_objects_repaired == r.num_objects_repaired;
 }
 
 // -- object_stat_collection_t --
@@ -2617,6 +2641,18 @@ void pg_stat_t::dump(Formatter *f) const
   for (vector<int32_t>::const_iterator p = acting.begin(); p != acting.end(); ++p)
     f->dump_int("osd", *p);
   f->close_section();
+  f->open_array_section("avail_no_missing");
+  for (auto p = avail_no_missing.cbegin(); p != avail_no_missing.cend(); ++p)
+    f->dump_stream("shard") << *p;
+  f->close_section();
+  f->open_array_section("object_location_counts");
+  for (auto p = object_location_counts.cbegin(); p != object_location_counts.cend(); ++p) {
+    f->open_object_section("entry");
+    f->dump_stream("shards") << p->first;
+    f->dump_int("objects", p->second);
+    f->close_section();
+  }
+  f->close_section();
   f->open_array_section("blocked_by");
   for (vector<int32_t>::const_iterator p = blocked_by.begin();
        p != blocked_by.end(); ++p)
@@ -2653,7 +2689,7 @@ void pg_stat_t::dump_brief(Formatter *f) const
 
 void pg_stat_t::encode(bufferlist &bl) const
 {
-  ENCODE_START(25, 22, bl);
+  ENCODE_START(26, 22, bl);
   encode(version, bl);
   encode(reported_seq, bl);
   encode(reported_epoch, bl);
@@ -2699,6 +2735,8 @@ void pg_stat_t::encode(bufferlist &bl) const
   encode(top_state, bl);
   encode(purged_snaps, bl);
   encode(manifest_stats_invalid, bl);
+  encode(avail_no_missing, bl);
+  encode(object_location_counts, bl);
   ENCODE_FINISH(bl);
 }
 
@@ -2706,7 +2744,7 @@ void pg_stat_t::decode(bufferlist::const_iterator &bl)
 {
   bool tmp;
   uint32_t old_state;
-  DECODE_START(25, bl);
+  DECODE_START(26, bl);
   decode(version, bl);
   decode(reported_seq, bl);
   decode(reported_epoch, bl);
@@ -2769,6 +2807,10 @@ void pg_stat_t::decode(bufferlist::const_iterator &bl)
     } else {
       manifest_stats_invalid = true;
     }
+    if (struct_v >= 26) {
+      decode(avail_no_missing, bl);
+      decode(object_location_counts, bl);
+    }
   }
   DECODE_FINISH(bl);
 }
@@ -2810,6 +2852,11 @@ void pg_stat_t::generate_test_instances(list<pg_stat_t*>& o)
   a.up.push_back(123);
   a.up_primary = 123;
   a.acting.push_back(456);
+  a.avail_no_missing.push_back(pg_shard_t(456, shard_id_t::NO_SHARD));
+  set<pg_shard_t> sset = { pg_shard_t(0), pg_shard_t(1) };
+  a.object_location_counts.insert(make_pair(sset, 10));
+  sset.insert(pg_shard_t(2));
+  a.object_location_counts.insert(make_pair(sset, 5));
   a.acting_primary = 456;
   o.push_back(new pg_stat_t(a));
 
@@ -2854,6 +2901,8 @@ bool operator==(const pg_stat_t& l, const pg_stat_t& r)
     l.ondisk_log_size == r.ondisk_log_size &&
     l.up == r.up &&
     l.acting == r.acting &&
+    l.avail_no_missing == r.avail_no_missing &&
+    l.object_location_counts == r.object_location_counts &&
     l.mapping_epoch == r.mapping_epoch &&
     l.blocked_by == r.blocked_by &&
     l.last_became_active == r.last_became_active &&

@@ -238,6 +238,7 @@ class AsioFrontend {
     tcp::acceptor acceptor;
     tcp::socket socket;
     bool use_ssl = false;
+    bool use_nodelay = false;
 
     explicit Listener(boost::asio::io_context& context)
       : acceptor(context), socket(context) {}
@@ -301,7 +302,7 @@ unsigned short parse_port(const char *input, boost::system::error_code& ec)
   }
   return port;
 }
-
+	
 tcp::endpoint parse_endpoint(boost::asio::string_view input,
                              unsigned short default_port,
                              boost::system::error_code& ec)
@@ -392,6 +393,9 @@ int AsioFrontend::init()
     }
     listeners.emplace_back(context);
     listeners.back().endpoint.port(port);
+
+    listeners.emplace_back(context);
+    listeners.back().endpoint = tcp::endpoint(tcp::v6(), port);
   }
 
   auto endpoints = config.equal_range("endpoint");
@@ -404,14 +408,39 @@ int AsioFrontend::init()
     listeners.emplace_back(context);
     listeners.back().endpoint = endpoint;
   }
+  // parse tcp nodelay
+  auto nodelay = config.find("tcp_nodelay");
+  if (nodelay != config.end()) {
+    for (auto& l : listeners) {
+      l.use_nodelay = (nodelay->second == "1");
+    }
+  }
+  
 
+  bool socket_bound = false;
   // start listeners
   for (auto& l : listeners) {
     l.acceptor.open(l.endpoint.protocol(), ec);
     if (ec) {
+      if (ec == boost::asio::error::address_family_not_supported) {
+	ldout(ctx(), 0) << "WARNING: cannot open socket for endpoint=" << l.endpoint
+			<< ", " << ec.message() << dendl;
+	continue;
+      }
+
       lderr(ctx()) << "failed to open socket: " << ec.message() << dendl;
       return -ec.value();
     }
+
+    if (l.endpoint.protocol() == tcp::v6()) {
+      l.acceptor.set_option(boost::asio::ip::v6_only(true), ec);
+      if (ec) {
+        lderr(ctx()) << "failed to set v6_only socket option: "
+		     << ec.message() << dendl;
+	return -ec.value();
+      }
+    }
+
     l.acceptor.set_option(tcp::acceptor::reuse_address(true));
     l.acceptor.bind(l.endpoint, ec);
     if (ec) {
@@ -419,6 +448,7 @@ int AsioFrontend::init()
           << ": " << ec.message() << dendl;
       return -ec.value();
     }
+
     l.acceptor.listen(boost::asio::socket_base::max_connections);
     l.acceptor.async_accept(l.socket,
                             [this, &l] (boost::system::error_code ec) {
@@ -426,7 +456,13 @@ int AsioFrontend::init()
                             });
 
     ldout(ctx(), 4) << "frontend listening on " << l.endpoint << dendl;
+    socket_bound = true;
   }
+  if (!socket_bound) {
+    lderr(ctx()) << "Unable to listen at any endpoints" << dendl;
+    return -EINVAL;
+  }
+
   return drop_privileges(ctx());
 }
 
@@ -491,6 +527,10 @@ int AsioFrontend::init_ssl()
     listeners.emplace_back(context);
     listeners.back().endpoint.port(port);
     listeners.back().use_ssl = true;
+
+    listeners.emplace_back(context);
+    listeners.back().endpoint = tcp::endpoint(tcp::v6(), port);
+    listeners.back().use_ssl = true;
   }
 
   auto endpoints = config.equal_range("ssl_endpoint");
@@ -522,6 +562,8 @@ void AsioFrontend::accept(Listener& l, boost::system::error_code ec)
     throw ec;
   }
   auto socket = std::move(l.socket);
+  tcp::no_delay options(l.use_nodelay);
+  socket.set_option(options,ec);
   l.acceptor.async_accept(l.socket,
                           [this, &l] (boost::system::error_code ec) {
                             accept(l, ec);

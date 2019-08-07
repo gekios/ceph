@@ -646,6 +646,11 @@ void OSDMonitor::on_active()
 
   if (mon->is_leader()) {
     mon->clog->debug() << "osdmap " << osdmap;
+    if (!priority_convert) {
+      // Only do this once at start-up
+      convert_pool_priorities();
+      priority_convert = true;
+    }
   } else {
     list<MonOpRequestRef> ls;
     take_all_failures(ls);
@@ -2448,6 +2453,13 @@ bool OSDMonitor::can_mark_down(int i)
     return false;
   }
 
+  if (osdmap.get_crush_node_flags(i) & CEPH_OSD_NODOWN) {
+    dout(5) << __func__ << " osd." << i
+	    << " is marked as nodown via a crush node flag, "
+            << "will not mark it down" << dendl;
+    return false;
+  }
+
   int num_osds = osdmap.get_num_osds();
   if (num_osds == 0) {
     dout(5) << __func__ << " no osds" << dendl;
@@ -2478,6 +2490,13 @@ bool OSDMonitor::can_mark_up(int i)
     return false;
   }
 
+  if (osdmap.get_crush_node_flags(i) & CEPH_OSD_NOUP) {
+    dout(5) << __func__ << " osd." << i
+	    << " is marked as noup via a crush node flag, "
+            << "will not mark it up" << dendl;
+    return false;
+  }
+
   return true;
 }
 
@@ -2494,6 +2513,13 @@ bool OSDMonitor::can_mark_out(int i)
 
   if (osdmap.is_noout(i)) {
     dout(5) << __func__ << " osd." << i << " is marked as noout, "
+            << "will not mark it out" << dendl;
+    return false;
+  }
+
+  if (osdmap.get_crush_node_flags(i) & CEPH_OSD_NOOUT) {
+    dout(5) << __func__ << " osd." << i
+	    << " is marked as noout via a crush node flag, "
             << "will not mark it out" << dendl;
     return false;
   }
@@ -2530,6 +2556,13 @@ bool OSDMonitor::can_mark_in(int i)
 
   if (osdmap.is_noin(i)) {
     dout(5) << __func__ << " osd." << i << " is marked as noin, "
+            << "will not mark it in" << dendl;
+    return false;
+  }
+
+  if (osdmap.get_crush_node_flags(i) & CEPH_OSD_NOIN) {
+    dout(5) << __func__ << " osd." << i
+	    << " is marked as noin via a crush node flag, "
             << "will not mark it in" << dendl;
     return false;
   }
@@ -4346,6 +4379,8 @@ void OSDMonitor::tick()
    * ratio set by g_conf()->mon_osd_min_in_ratio. So it's not really up to us.
    */
   if (can_mark_out(-1)) {
+    string down_out_subtree_limit = g_conf().get_val<string>(
+      "mon_osd_down_out_subtree_limit");
     set<int> down_cache;  // quick cache of down subtrees
 
     map<int,utime_t>::iterator i = down_pending_out.begin();
@@ -4375,12 +4410,13 @@ void OSDMonitor::tick()
 	}
 
 	// is this an entire large subtree down?
-	if (g_conf()->mon_osd_down_out_subtree_limit.length()) {
-	  int type = osdmap.crush->get_type_id(g_conf()->mon_osd_down_out_subtree_limit);
+	if (down_out_subtree_limit.length()) {
+	  int type = osdmap.crush->get_type_id(down_out_subtree_limit);
 	  if (type > 0) {
 	    if (osdmap.containing_subtree_is_down(cct, o, type, &down_cache)) {
-	      dout(10) << "tick entire containing " << g_conf()->mon_osd_down_out_subtree_limit
-		       << " subtree for osd." << o << " is down; resetting timer" << dendl;
+	      dout(10) << "tick entire containing " << down_out_subtree_limit
+		       << " subtree for osd." << o
+		       << " is down; resetting timer" << dendl;
 	      // reset timer, too.
 	      down_pending_out[o] = now;
 	      continue;
@@ -4553,7 +4589,8 @@ namespace {
     COMPRESSION_MODE, COMPRESSION_ALGORITHM, COMPRESSION_REQUIRED_RATIO,
     COMPRESSION_MAX_BLOB_SIZE, COMPRESSION_MIN_BLOB_SIZE,
     CSUM_TYPE, CSUM_MAX_BLOCK, CSUM_MIN_BLOCK, FINGERPRINT_ALGORITHM,
-    PG_AUTOSCALE_MODE, PG_NUM_MIN, TARGET_SIZE_BYTES, TARGET_SIZE_RATIO };
+    PG_AUTOSCALE_MODE, PG_NUM_MIN, TARGET_SIZE_BYTES, TARGET_SIZE_RATIO,
+    PG_AUTOSCALE_BIAS };
 
   std::set<osd_pool_get_choices>
     subtract_second_from_first(const std::set<osd_pool_get_choices>& first,
@@ -5253,6 +5290,7 @@ bool OSDMonitor::preprocess_command(MonOpRequestRef op)
       {"pg_num_min", PG_NUM_MIN},
       {"target_size_bytes", TARGET_SIZE_BYTES},
       {"target_size_ratio", TARGET_SIZE_RATIO},
+      {"pg_autoscale_bias", PG_AUTOSCALE_BIAS},
     };
 
     typedef std::set<osd_pool_get_choices> choices_set_t;
@@ -5468,6 +5506,7 @@ bool OSDMonitor::preprocess_command(MonOpRequestRef op)
 	  case PG_NUM_MIN:
 	  case TARGET_SIZE_BYTES:
 	  case TARGET_SIZE_RATIO:
+	  case PG_AUTOSCALE_BIAS:
             pool_opts_t::key_t key = pool_opts_t::get_opt_desc(i->first).key;
             if (p->opts.is_set(key)) {
               if(*it == CSUM_TYPE) {
@@ -5624,6 +5663,7 @@ bool OSDMonitor::preprocess_command(MonOpRequestRef op)
 	  case PG_NUM_MIN:
 	  case TARGET_SIZE_BYTES:
 	  case TARGET_SIZE_RATIO:
+	  case PG_AUTOSCALE_BIAS:
 	    for (i = ALL_CHOICES.begin(); i != ALL_CHOICES.end(); ++i) {
 	      if (i->second == *it)
 		break;
@@ -7610,13 +7650,17 @@ int OSDMonitor::prepare_command_pool_set(const cmdmap_t& cmdmap,
         ss << "error parsing int value '" << val << "': " << interr;
         return -EINVAL;
       }
-      if (n < 0) {
-        ss << "pool recovery_priority can not be negative";
-        return -EINVAL;
-      } else if (n >= 30) {
-        ss << "pool recovery_priority should be less than 30 due to "
-           << "Ceph internal implementation restrictions";
-        return -EINVAL;
+      if (!g_conf()->debug_allow_any_pool_priority) {
+        if (n > OSD_POOL_PRIORITY_MAX || n < OSD_POOL_PRIORITY_MIN) {
+          ss << "pool recovery_priority must be between " << OSD_POOL_PRIORITY_MIN
+	     << " and " << OSD_POOL_PRIORITY_MAX;
+          return -EINVAL;
+        }
+      }
+    } else if (var == "pg_autoscale_bias") {
+      if (f < 0.0 || f > 1000.0) {
+	ss << "pg_autoscale_bias must be between 0 and 1000";
+	return -EINVAL;
       }
     }
 
@@ -9369,7 +9413,8 @@ bool OSDMonitor::prepare_command_impl(MonOpRequestRef op,
       CrushWrapper newcrush;
       _get_pending_crush(newcrush);
 
-      err = newcrush.create_or_move_item(cct, osdid, weight, osd_name, loc);
+      err = newcrush.create_or_move_item(cct, osdid, weight, osd_name, loc,
+					 g_conf()->osd_crush_update_weight_set);
       if (err == 0) {
 	ss << "create-or-move updated item name '" << osd_name
 	   << "' weight " << weight
@@ -9412,7 +9457,9 @@ bool OSDMonitor::prepare_command_impl(MonOpRequestRef op,
 
       if (!newcrush.check_item_loc(cct, id, loc, (int *)NULL)) {
 	if (id >= 0) {
-	  err = newcrush.create_or_move_item(cct, id, 0, name, loc);
+	  err = newcrush.create_or_move_item(
+	    cct, id, 0, name, loc,
+	    g_conf()->osd_crush_update_weight_set);
 	} else {
 	  err = newcrush.move_bucket(cct, id, loc);
 	}
@@ -9586,6 +9633,8 @@ bool OSDMonitor::prepare_command_impl(MonOpRequestRef op,
 	break;
       }
       if (err == 0) {
+        if (!unlink_only)
+          pending_inc.new_crush_node_flags[id] = 0;
 	ss << "removed item id " << id << " name '" << name << "' from crush map";
 	getline(ss, rs);
 	wait_for_finished_proposal(op, new Monitor::C_Command(mon, op, 0, rs,
@@ -9633,7 +9682,8 @@ bool OSDMonitor::prepare_command_impl(MonOpRequestRef op,
       goto reply;
     }
 
-    err = newcrush.adjust_item_weightf(cct, id, w);
+    err = newcrush.adjust_item_weightf(cct, id, w,
+				       g_conf()->osd_crush_update_weight_set);
     if (err < 0)
       goto reply;
     pending_inc.crush.clear();
@@ -9671,7 +9721,8 @@ bool OSDMonitor::prepare_command_impl(MonOpRequestRef op,
       goto reply;
     }
 
-    err = newcrush.adjust_subtree_weightf(cct, id, w);
+    err = newcrush.adjust_subtree_weightf(cct, id, w,
+					  g_conf()->osd_crush_update_weight_set);
     if (err < 0)
       goto reply;
     pending_inc.crush.clear();
@@ -10509,8 +10560,8 @@ bool OSDMonitor::prepare_command_impl(MonOpRequestRef op,
     vector<string> idvec;
     cmd_getval(cct, cmdmap, "ids", idvec);
     for (unsigned j = 0; j < idvec.size() && !stop; j++) {
-
       set<int> osds;
+      set<int> crush_nodes;
 
       // wildcard?
       if (j == 0 &&
@@ -10518,21 +10569,43 @@ bool OSDMonitor::prepare_command_impl(MonOpRequestRef op,
         osdmap.get_all_osds(osds);
         stop = true;
       } else {
-        // try traditional single osd way
-
-        long osd = parse_osd_id(idvec[j].c_str(), &ss);
-        if (osd < 0) {
-          // ss has reason for failure
-          ss << ", unable to parse osd id:\"" << idvec[j] << "\". ";
-          err = -EINVAL;
-          continue;
-        }
-
-        osds.insert(osd);
+        if (long osd = parse_osd_id(idvec[j].c_str(), &ss); osd >= 0) {
+          osds.insert(osd);
+	} else if (osdmap.crush->name_exists(idvec[j])) {
+          std::stringstream().swap(ss);
+	  crush_nodes.insert(osdmap.crush->get_item_id(idvec[j]));
+	} else {
+	  // ss has reason for failure
+	  ss << ", unable to parse osd id or crush node:\"" << idvec[j]
+	     << "\". ";
+	  err = -EINVAL;
+	  continue;
+	}
       }
 
+      for (auto &i : crush_nodes) {
+	auto q = osdmap.crush_node_flags.find(i);
+	if (pending_inc.new_crush_node_flags.count(i) == 0 &&
+	    q != osdmap.crush_node_flags.end()) {
+	  pending_inc.new_crush_node_flags[i] = q->second;
+	}
+	switch (option) {
+	case OP_NOUP:
+	  pending_inc.new_crush_node_flags[i] |= CEPH_OSD_NOUP;
+	  break;
+	case OP_NODOWN:
+	  pending_inc.new_crush_node_flags[i] |= CEPH_OSD_NODOWN;
+	  break;
+	case OP_NOIN:
+	  pending_inc.new_crush_node_flags[i] |= CEPH_OSD_NOIN;
+	  break;
+	case OP_NOOUT:
+	  pending_inc.new_crush_node_flags[i] |= CEPH_OSD_NOOUT;
+	  break;
+	}
+	any = true;
+      }
       for (auto &osd : osds) {
-
         if (!osdmap.exists(osd)) {
           ss << "osd." << osd << " does not exist. ";
           continue;
@@ -10540,11 +10613,6 @@ bool OSDMonitor::prepare_command_impl(MonOpRequestRef op,
 
         switch (option) {
         case OP_NOUP:
-          if (osdmap.is_up(osd)) {
-            ss << "osd." << osd << " is already up. ";
-            continue;
-          }
-
           if (osdmap.is_noup(osd)) {
             if (pending_inc.pending_osd_state_clear(osd, CEPH_OSD_NOUP))
               any = true;
@@ -10556,11 +10624,6 @@ bool OSDMonitor::prepare_command_impl(MonOpRequestRef op,
           break;
 
         case OP_NODOWN:
-          if (osdmap.is_down(osd)) {
-            ss << "osd." << osd << " is already down. ";
-            continue;
-          }
-
           if (osdmap.is_nodown(osd)) {
             if (pending_inc.pending_osd_state_clear(osd, CEPH_OSD_NODOWN))
               any = true;
@@ -10572,11 +10635,6 @@ bool OSDMonitor::prepare_command_impl(MonOpRequestRef op,
           break;
 
         case OP_NOIN:
-          if (osdmap.is_in(osd)) {
-            ss << "osd." << osd << " is already in. ";
-            continue;
-          }
-
           if (osdmap.is_noin(osd)) {
             if (pending_inc.pending_osd_state_clear(osd, CEPH_OSD_NOIN))
               any = true;
@@ -10588,11 +10646,6 @@ bool OSDMonitor::prepare_command_impl(MonOpRequestRef op,
           break;
 
         case OP_NOOUT:
-          if (osdmap.is_out(osd)) {
-            ss << "osd." << osd << " is already out. ";
-            continue;
-          }
-
           if (osdmap.is_noout(osd)) {
             if (pending_inc.pending_osd_state_clear(osd, CEPH_OSD_NOOUT))
               any = true;
@@ -10644,8 +10697,8 @@ bool OSDMonitor::prepare_command_impl(MonOpRequestRef op,
     cmd_getval(cct, cmdmap, "ids", idvec);
 
     for (unsigned j = 0; j < idvec.size() && !stop; j++) {
-
       vector<int> osds;
+      set<int> crush_nodes;
 
       // wildcard?
       if (j == 0 &&
@@ -10710,21 +10763,43 @@ bool OSDMonitor::prepare_command_impl(MonOpRequestRef op,
 
         stop = true;
       } else {
-        // try traditional single osd way
-
-        long osd = parse_osd_id(idvec[j].c_str(), &ss);
-        if (osd < 0) {
-          // ss has reason for failure
-          ss << ", unable to parse osd id:\"" << idvec[j] << "\". ";
-          err = -EINVAL;
-          continue;
-        }
-
-        osds.push_back(osd);
+	if (long osd = parse_osd_id(idvec[j].c_str(), &ss); osd >= 0) {
+	  osds.push_back(osd);
+        } else if (osdmap.crush->name_exists(idvec[j])) {
+          std::stringstream().swap(ss);
+          crush_nodes.insert(osdmap.crush->get_item_id(idvec[j]));
+	} else {
+	  // ss has reason for failure
+	  ss << ", unable to parse osd id or crush node:\"" << idvec[j]
+	     << "\". ";
+	  err = -EINVAL;
+	  continue;
+	}
       }
 
+      for (auto &i : crush_nodes) {
+	auto q = osdmap.crush_node_flags.find(i);
+	if (pending_inc.new_crush_node_flags.count(i) == 0 &&
+	    q != osdmap.crush_node_flags.end()) {
+	  pending_inc.new_crush_node_flags[i] = q->second;
+	}
+	switch (option) {
+	case OP_NOUP:
+	  pending_inc.new_crush_node_flags[i] &= ~CEPH_OSD_NOUP;
+	  break;
+	case OP_NODOWN:
+	  pending_inc.new_crush_node_flags[i] &= ~CEPH_OSD_NODOWN;
+	  break;
+	case OP_NOIN:
+	  pending_inc.new_crush_node_flags[i] &= ~CEPH_OSD_NOIN;
+	  break;
+	case OP_NOOUT:
+	  pending_inc.new_crush_node_flags[i] &= ~CEPH_OSD_NOOUT;
+	  break;
+	}
+	any = true;
+      }
       for (auto &osd : osds) {
-
         if (!osdmap.exists(osd)) {
           ss << "osd." << osd << " does not exist. ";
           continue;
@@ -13144,4 +13219,56 @@ void OSDMonitor::_pool_op_reply(MonOpRequestRef op,
   MPoolOpReply *reply = new MPoolOpReply(m->fsid, m->get_tid(),
 					 ret, epoch, get_last_committed(), blp);
   mon->send_reply(op, reply);
+}
+
+void OSDMonitor::convert_pool_priorities(void)
+{
+  pool_opts_t::key_t key = pool_opts_t::get_opt_desc("recovery_priority").key;
+  int64_t max_prio = 0;
+  int64_t min_prio = 0;
+  for (const auto &i : osdmap.get_pools()) {
+    const auto &pool = i.second;
+
+    if (pool.opts.is_set(key)) {
+      int64_t prio;
+      pool.opts.get(key, &prio);
+      if (prio > max_prio)
+	max_prio = prio;
+      if (prio < min_prio)
+	min_prio = prio;
+    }
+  }
+  if (max_prio <= OSD_POOL_PRIORITY_MAX && min_prio >= OSD_POOL_PRIORITY_MIN) {
+    dout(20) << __func__ << " nothing to fix" << dendl;
+    return;
+  }
+  // Current pool priorities exceeds new maximum
+  for (const auto &i : osdmap.get_pools()) {
+    const auto pool_id = i.first;
+    pg_pool_t pool = i.second;
+
+    int64_t prio = 0;
+    pool.opts.get(key, &prio);
+    int64_t n;
+
+    if (prio > 0 && max_prio > OSD_POOL_PRIORITY_MAX) { // Likely scenario
+      // Scaled priority range 0 to OSD_POOL_PRIORITY_MAX
+      n = (float)prio / max_prio * OSD_POOL_PRIORITY_MAX;
+    } else if (prio < 0 && min_prio < OSD_POOL_PRIORITY_MIN) {
+      // Scaled  priority range OSD_POOL_PRIORITY_MIN to 0
+      n = (float)prio / min_prio * OSD_POOL_PRIORITY_MIN;
+    } else {
+      continue;
+    }
+    if (n == 0) {
+      pool.opts.unset(key);
+    } else {
+      pool.opts.set(key, static_cast<int64_t>(n));
+    }
+    dout(10) << __func__ << " pool " << pool_id
+	     << " recovery_priority adjusted "
+	     << prio << " to " << n << dendl;
+    pool.last_change = pending_inc.epoch;
+    pending_inc.new_pools[pool_id] = pool;
+  }
 }

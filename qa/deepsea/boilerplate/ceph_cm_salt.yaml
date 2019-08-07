@@ -1,1 +1,5 @@
 ceph_cm: salt
+<<<<<<< HEAD
+=======
+ceph_cm_ansible: false
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86

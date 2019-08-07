@@ -1123,6 +1123,8 @@ PG::Scrubber::Scrubber()
    shallow_errors(0), deep_errors(0), fixed(0),
    must_scrub(false), must_deep_scrub(false), must_repair(false),
    auto_repair(false),
+   check_repair(false),
+   deep_scrub_on_error(false),
    num_digest_updates_pending(0),
    state(INACTIVE),
    deep(false)
@@ -2333,6 +2335,8 @@ bool PG::queue_scrub()
   if (is_scrubbing()) {
     return false;
   }
+  // An interrupted recovery repair could leave this set.
+  state_clear(PG_STATE_REPAIR);
   scrubber.priority = scrubber.must_scrub ?
          cct->_conf->osd_requested_scrub_priority : get_scrub_priority();
   scrubber.must_scrub = false;
@@ -2451,14 +2455,27 @@ bool PG::set_force_backfill(bool b)
   return did;
 }
 
-inline int PG::clamp_recovery_priority(int priority)
+int PG::clamp_recovery_priority(int priority, int pool_recovery_priority, int max)
 {
   static_assert(OSD_RECOVERY_PRIORITY_MIN < OSD_RECOVERY_PRIORITY_MAX, "Invalid priority range");
   static_assert(OSD_RECOVERY_PRIORITY_MIN >= 0, "Priority range must match unsigned type");
 
+  ceph_assert(max <= OSD_RECOVERY_PRIORITY_MAX);
+
+  // User can't set this too high anymore, but might be a legacy value
+  if (pool_recovery_priority > OSD_POOL_PRIORITY_MAX)
+    pool_recovery_priority = OSD_POOL_PRIORITY_MAX;
+  if (pool_recovery_priority < OSD_POOL_PRIORITY_MIN)
+    pool_recovery_priority = OSD_POOL_PRIORITY_MIN;
+  // Shift range from min to max to 0 to max - min
+  pool_recovery_priority += (0 - OSD_POOL_PRIORITY_MIN);
+  ceph_assert(pool_recovery_priority >= 0 && pool_recovery_priority <= (OSD_POOL_PRIORITY_MAX - OSD_POOL_PRIORITY_MIN));
+
+  priority += pool_recovery_priority;
+
   // Clamp to valid range
-  if (priority > OSD_RECOVERY_PRIORITY_MAX) {
-    return OSD_RECOVERY_PRIORITY_MAX;
+  if (priority > max) {
+    return max;
   } else if (priority < OSD_RECOVERY_PRIORITY_MIN) {
     return OSD_RECOVERY_PRIORITY_MIN;
   } else {
@@ -2469,15 +2486,25 @@ inline int PG::clamp_recovery_priority(int priority)
 unsigned PG::get_recovery_priority()
 {
   // a higher value -> a higher priority
-  int64_t ret = 0;
+  int ret = OSD_RECOVERY_PRIORITY_BASE;
+  int base = ret;
 
   if (state & PG_STATE_FORCED_RECOVERY) {
     ret = OSD_RECOVERY_PRIORITY_FORCED;
   } else {
-    pool.info.opts.get(pool_opts_t::RECOVERY_PRIORITY, &ret);
-    ret = clamp_recovery_priority(OSD_RECOVERY_PRIORITY_BASE + ret);
+    // XXX: This priority boost isn't so much about inactive, but about data-at-risk
+    if (is_degraded() && info.stats.avail_no_missing.size() < pool.info.min_size) {
+      base = OSD_RECOVERY_INACTIVE_PRIORITY_BASE;
+      // inactive: no. of replicas < min_size, highest priority since it blocks IO
+      ret = base + (pool.info.min_size - info.stats.avail_no_missing.size());
+    }
+
+    int64_t pool_recovery_priority = 0;
+    pool.info.opts.get(pool_opts_t::RECOVERY_PRIORITY, &pool_recovery_priority);
+
+    ret = clamp_recovery_priority(ret, pool_recovery_priority, max_prio_map[base]);
   }
-  dout(20) << __func__ << " recovery priority for " << *this << " is " << ret << ", state is " << state << dendl;
+  dout(20) << __func__ << " recovery priority is " << ret << dendl;
   return static_cast<unsigned>(ret);
 }
 
@@ -2485,30 +2512,35 @@ unsigned PG::get_backfill_priority()
 {
   // a higher value -> a higher priority
   int ret = OSD_BACKFILL_PRIORITY_BASE;
+  int base = ret;
+
   if (state & PG_STATE_FORCED_BACKFILL) {
     ret = OSD_BACKFILL_PRIORITY_FORCED;
   } else {
     if (acting.size() < pool.info.min_size) {
+      base = OSD_BACKFILL_INACTIVE_PRIORITY_BASE;
       // inactive: no. of replicas < min_size, highest priority since it blocks IO
-      ret = OSD_BACKFILL_INACTIVE_PRIORITY_BASE + (pool.info.min_size - acting.size());
+      ret = base + (pool.info.min_size - acting.size());
 
     } else if (is_undersized()) {
       // undersized: OSD_BACKFILL_DEGRADED_PRIORITY_BASE + num missing replicas
       ceph_assert(pool.info.size > actingset.size());
-      ret = OSD_BACKFILL_DEGRADED_PRIORITY_BASE + (pool.info.size - actingset.size());
+      base = OSD_BACKFILL_DEGRADED_PRIORITY_BASE;
+      ret = base + (pool.info.size - actingset.size());
 
     } else if (is_degraded()) {
       // degraded: baseline degraded
-      ret = OSD_BACKFILL_DEGRADED_PRIORITY_BASE;
+      base = ret = OSD_BACKFILL_DEGRADED_PRIORITY_BASE;
     }
 
     // Adjust with pool's recovery priority
     int64_t pool_recovery_priority = 0;
     pool.info.opts.get(pool_opts_t::RECOVERY_PRIORITY, &pool_recovery_priority);
 
-    ret = clamp_recovery_priority(pool_recovery_priority + ret);
+    ret = clamp_recovery_priority(ret, pool_recovery_priority, max_prio_map[base]);
   }
 
+  dout(20) << __func__ << " backfill priority is " << ret << dendl;
   return static_cast<unsigned>(ret);
 }
 
@@ -2542,6 +2574,8 @@ Context *PG::finish_recovery()
 void PG::_finish_recovery(Context *c)
 {
   lock();
+  // When recovery is initiated by a repair, that flag is left on
+  state_clear(PG_STATE_REPAIR);
   if (deleting) {
     unlock();
     return;
@@ -2557,6 +2591,7 @@ void PG::_finish_recovery(Context *c)
       dout(10) << "_finish_recovery requeueing for scrub" << dendl;
       scrub_after_recovery = false;
       scrubber.must_deep_scrub = true;
+      scrubber.check_repair = true;
       queue_scrub();
     }
   } else {
@@ -3196,6 +3231,8 @@ void PG::_update_calc_stats()
   info.stats.stats.sum.num_objects_degraded = 0;
   info.stats.stats.sum.num_objects_unfound = 0;
   info.stats.stats.sum.num_objects_misplaced = 0;
+  info.stats.avail_no_missing.clear();
+  info.stats.object_location_counts.clear();
 
   if ((is_remapped() || is_undersized() || !is_clean()) && (is_peered() || is_activating())) {
     dout(20) << __func__ << " actingset " << actingset << " upset "
@@ -3229,6 +3266,8 @@ void PG::_update_calc_stats()
         acting_source_objects.insert(make_pair(missing, pg_whoami));
       }
       info.stats.stats.sum.num_objects_missing_on_primary = missing;
+      if (missing == 0)
+        info.stats.avail_no_missing.push_back(pg_whoami);
       dout(20) << __func__ << " shard " << pg_whoami
                << " primary objects " << num_objects
                << " missing " << missing
@@ -3262,11 +3301,32 @@ void PG::_update_calc_stats()
 	acting_source_objects.insert(make_pair(missing, peer.first));
       }
       peer.second.stats.stats.sum.num_objects_missing = missing;
+      if (missing == 0)
+        info.stats.avail_no_missing.push_back(peer.first);
       dout(20) << __func__ << " shard " << peer.first
                << " objects " << peer_num_objects
                << " missing " << missing
                << dendl;
     }
+
+    // Compute object_location_counts
+    for (auto& ml: missing_loc.get_missing_locs()) {
+      info.stats.object_location_counts[ml.second]++;
+      dout(30) << __func__ << " " << ml.first << " object_location_counts["
+	       << ml.second << "]=" << info.stats.object_location_counts[ml.second]
+	       << dendl;
+    }
+    int64_t not_missing = num_objects - missing_loc.get_missing_locs().size();
+    if (not_missing) {
+	// During recovery we know upset == actingset and is being populated
+	// During backfill we know that all non-missing objects are in the actingset
+        info.stats.object_location_counts[actingset] = not_missing;
+    }
+    dout(30) << __func__ << " object_location_counts["
+	     << upset << "]=" << info.stats.object_location_counts[upset]
+	     << dendl;
+    dout(20) << __func__ << " object_location_counts "
+	     << info.stats.object_location_counts << dendl;
 
     // A misplaced object is not stored on the correct OSD
     int64_t misplaced = 0;
@@ -3446,8 +3506,10 @@ void PG::publish_stats_to_osd()
 
   if (info.stats.stats.sum.num_scrub_errors)
     state_set(PG_STATE_INCONSISTENT);
-  else
+  else {
     state_clear(PG_STATE_INCONSISTENT);
+    state_clear(PG_STATE_FAILED_REPAIR);
+  }
 
   utime_t now = ceph_clock_now();
   if (info.stats.state != state) {
@@ -3887,11 +3949,16 @@ void PG::append_log(
 
   PGLogEntryHandler handler{this, &t};
   if (!transaction_applied) {
-     /* We must be a backfill peer, so it's ok if we apply
+     /* We must be a backfill or async recovery peer, so it's ok if we apply
       * out-of-turn since we won't be considered when
       * determining a min possible last_update.
+      *
+      * We skip_rollforward() here, which advances the crt, without
+      * doing an actual rollforward. This avoids cleaning up entries
+      * from the backend and we do not end up in a situation, where the
+      * object is deleted before we can _merge_object_divergent_entries().
       */
-    pg_log.roll_forward(&handler);
+    pg_log.skip_rollforward();
   }
 
   for (vector<pg_log_entry_t>::const_iterator p = logv.begin();
@@ -4286,7 +4353,7 @@ bool PG::sched_scrub()
   time_for_deep = (time_for_deep || deep_coin_flip);
 
   //NODEEP_SCRUB so ignore time initiated deep-scrub
-  if (osd->osd->get_osdmap()->test_flag(CEPH_OSDMAP_NODEEP_SCRUB) ||
+  if (get_osdmap()->test_flag(CEPH_OSDMAP_NODEEP_SCRUB) ||
       pool.info.has_flag(pg_pool_t::FLAG_NODEEP_SCRUB)) {
     time_for_deep = false;
     nodeep_scrub = true;
@@ -4296,7 +4363,7 @@ bool PG::sched_scrub()
     ceph_assert(!scrubber.must_deep_scrub);
 
     //NOSCRUB so skip regular scrubs
-    if ((osd->osd->get_osdmap()->test_flag(CEPH_OSDMAP_NOSCRUB) ||
+    if ((get_osdmap()->test_flag(CEPH_OSDMAP_NOSCRUB) ||
 	 pool.info.has_flag(pg_pool_t::FLAG_NOSCRUB)) && !time_for_deep) {
       if (scrubber.reserved) {
         // cancel scrub if it is still in scheduling,
@@ -4309,19 +4376,23 @@ bool PG::sched_scrub()
     }
   }
 
+  // Clear these in case user issues the scrub/repair command during
+  // the scheduling of the scrub/repair (e.g. request reservation)
+  scrubber.deep_scrub_on_error = false;
+  scrubber.auto_repair = false;
   if (cct->_conf->osd_scrub_auto_repair
       && get_pgbackend()->auto_repair_supported()
-      && time_for_deep
       // respect the command from user, and not do auto-repair
       && !scrubber.must_repair
       && !scrubber.must_scrub
       && !scrubber.must_deep_scrub) {
-    dout(20) << __func__ << ": auto repair with deep scrubbing" << dendl;
-    scrubber.auto_repair = true;
-  } else {
-    // this happens when user issue the scrub/repair command during
-    // the scheduling of the scrub/repair (e.g. request reservation)
-    scrubber.auto_repair = false;
+    if (time_for_deep) {
+      dout(20) << __func__ << ": auto repair with deep scrubbing" << dendl;
+      scrubber.auto_repair = true;
+    } else {
+      dout(20) << __func__ << ": auto repair with scrubbing, rescrub if errors found" << dendl;
+      scrubber.deep_scrub_on_error = true;
+    }
   }
 
   bool ret = true;
@@ -4647,12 +4718,12 @@ void PG::_scan_rollback_obs(const vector<ghobject_t> &rollback_obs)
        i != rollback_obs.end();
        ++i) {
     if (i->generation < trimmed_to.version) {
-      osd->clog->error() << "osd." << osd->whoami
-			<< " pg " << info.pgid
-			<< " found obsolete rollback obj "
-			<< *i << " generation < trimmed_to "
-			<< trimmed_to
-			<< "...repaired";
+      dout(10) << __func__ << "osd." << osd->whoami
+	       << " pg " << info.pgid
+	       << " found obsolete rollback obj "
+	       << *i << " generation < trimmed_to "
+	       << trimmed_to
+	       << "...repaired" << dendl;
       t.remove(coll, *i);
     }
   }
@@ -5531,11 +5602,12 @@ bool PG::range_intersects_scrub(const hobject_t &start, const hobject_t& end)
 	  end >= scrubber.start);
 }
 
-void PG::scrub_clear_state()
+void PG::scrub_clear_state(bool has_error)
 {
   ceph_assert(is_locked());
   state_clear(PG_STATE_SCRUBBING);
-  state_clear(PG_STATE_REPAIR);
+  if (!has_error)
+    state_clear(PG_STATE_REPAIR);
   state_clear(PG_STATE_DEEP_SCRUB);
   publish_stats_to_osd();
 
@@ -5723,7 +5795,9 @@ bool PG::ops_blocked_by_scrub() const {
 // the part that actually finalizes a scrub
 void PG::scrub_finish() 
 {
+  dout(20) << __func__ << dendl;
   bool repair = state_test(PG_STATE_REPAIR);
+  bool do_deep_scrub = false;
   // if the repair request comes from auto-repair and large number of errors,
   // we would like to cancel auto-repair
   if (repair && scrubber.auto_repair
@@ -5733,6 +5807,15 @@ void PG::scrub_finish()
   }
   bool deep_scrub = state_test(PG_STATE_DEEP_SCRUB);
   const char *mode = (repair ? "repair": (deep_scrub ? "deep-scrub" : "scrub"));
+
+  // if a regular scrub had errors within the limit, do a deep scrub to auto repair.
+  if (scrubber.deep_scrub_on_error
+      && scrubber.authoritative.size() <= cct->_conf->osd_scrub_auto_repair_num_errors) {
+    ceph_assert(!deep_scrub);
+    scrubber.deep_scrub_on_error = false;
+    do_deep_scrub = true;
+    dout(20) << __func__ << " Try to auto repair after scrub errors" << dendl;
+  }
 
   // type-specific finish (can tally more errors)
   _scrub_finish();
@@ -5773,9 +5856,17 @@ void PG::scrub_finish()
     if (scrubber.fixed == scrubber.shallow_errors + scrubber.deep_errors) {
       ceph_assert(deep_scrub);
       scrubber.shallow_errors = scrubber.deep_errors = 0;
-    } else {
+      dout(20) << __func__ << " All may be fixed" << dendl;
+    } else if (has_error) {
       // Deep scrub in order to get corrected error counts
       scrub_after_recovery = true;
+      dout(20) << __func__ << " Set scrub_after_recovery" << dendl;
+    } else if (scrubber.shallow_errors || scrubber.deep_errors) {
+      // We have errors but nothing can be fixed, so there is no repair
+      // possible.
+      state_set(PG_STATE_FAILED_REPAIR);
+      dout(10) << __func__ << " " << (scrubber.shallow_errors + scrubber.deep_errors)
+	       << " error(s) present with no repair possible" << dendl;
     }
   }
   if (deep_scrub) {
@@ -5789,7 +5880,6 @@ void PG::scrub_finish()
     dout(25) << __func__ << " shard " << pg_whoami << " num_omap_bytes = "
              << info.stats.stats.sum.num_omap_bytes << " num_omap_keys = "
              << info.stats.stats.sum.num_omap_keys << dendl;
-    publish_stats_to_osd();
   } else {
     info.stats.stats.sum.num_shallow_scrub_errors = scrubber.shallow_errors;
     // XXX: last_clean_scrub_stamp doesn't mean the pg is not inconsistent
@@ -5800,6 +5890,22 @@ void PG::scrub_finish()
   info.stats.stats.sum.num_scrub_errors = 
     info.stats.stats.sum.num_shallow_scrub_errors +
     info.stats.stats.sum.num_deep_scrub_errors;
+  if (scrubber.check_repair) {
+    scrubber.check_repair = false;
+    if (info.stats.stats.sum.num_scrub_errors) {
+      state_set(PG_STATE_FAILED_REPAIR);
+      dout(10) << __func__ << " " << info.stats.stats.sum.num_scrub_errors
+	       << " error(s) still present after re-scrub" << dendl;
+    }
+  }
+  publish_stats_to_osd();
+  if (do_deep_scrub) {
+    // XXX: Auto scrub won't activate if must_scrub is set, but
+    // setting the scrub stamps affects what users see.
+    utime_t stamp = utime_t(0,1);
+    set_last_scrub_stamp(stamp);
+    set_last_deep_scrub_stamp(stamp);
+  }
   reg_next_scrub();
 
   {
@@ -5820,7 +5926,7 @@ void PG::scrub_finish()
 	  DoRecovery())));
   }
 
-  scrub_clear_state();
+  scrub_clear_state(has_error);
   scrub_unreserve_replicas();
 
   if (is_active() && is_primary()) {
@@ -6462,6 +6568,10 @@ ostream& operator<<(ostream& out, const PG& pg)
     out << " MUST_REPAIR";
   if (pg.scrubber.auto_repair)
     out << " AUTO_REPAIR";
+  if (pg.scrubber.check_repair)
+    out << " CHECK_REPAIR";
+  if (pg.scrubber.deep_scrub_on_error)
+    out << " DEEP_SCRUB_ON_ERROR";
   if (pg.scrubber.must_deep_scrub)
     out << " MUST_DEEP_SCRUB";
   if (pg.scrubber.must_scrub)
@@ -7643,6 +7753,7 @@ PG::RecoveryState::NotBackfilling::NotBackfilling(my_context ctx)
 {
   context< RecoveryMachine >().log_enter(state_name);
   PG *pg = context< RecoveryMachine >().pg;
+  pg->state_clear(PG_STATE_REPAIR);
   pg->publish_stats_to_osd();
 }
 

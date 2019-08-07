@@ -1118,7 +1118,8 @@ void Monitor::bootstrap()
   if (monmap->min_mon_release &&
       monmap->min_mon_release + 2 < (int)ceph_release()) {
     derr << "current monmap has min_mon_release "
-	 << ceph_release() << " (" << ceph_release_name(monmap->min_mon_release)
+	 << (int)monmap->min_mon_release
+	 << " (" << ceph_release_name(monmap->min_mon_release)
 	 << ") which is >2 releases older than me " << ceph_release()
 	 << " (" << ceph_release_name(ceph_release()) << "), stopping."
 	 << dendl;
@@ -1832,8 +1833,9 @@ void Monitor::handle_probe(MonOpRequestRef op)
     break;
 
   case MMonProbe::OP_MISSING_FEATURES:
-    derr << __func__ << " require release " << m->mon_release << " > "
-	 << ceph_release() << ", or missing features (have " << CEPH_FEATURES_ALL
+    derr << __func__ << " require release " << (int)m->mon_release << " > "
+	 << (int)ceph_release()
+	 << ", or missing features (have " << CEPH_FEATURES_ALL
 	 << ", required " << m->required_features
 	 << ", missing " << (m->required_features & ~CEPH_FEATURES_ALL) << ")"
 	 << dendl;
@@ -1848,9 +1850,11 @@ void Monitor::handle_probe_probe(MonOpRequestRef op)
   dout(10) << "handle_probe_probe " << m->get_source_inst() << *m
 	   << " features " << m->get_connection()->get_features() << dendl;
   uint64_t missing = required_features & ~m->get_connection()->get_features();
-  if (m->mon_release < monmap->min_mon_release || missing) {
-    dout(1) << " peer " << m->get_source_addr() << " release " << m->mon_release
-	    << " < min_mon_release " << monmap->min_mon_release
+  if ((m->mon_release > 0 && m->mon_release < monmap->min_mon_release) ||
+      missing) {
+    dout(1) << " peer " << m->get_source_addr()
+	    << " release " << (int)m->mon_release
+	    << " < min_mon_release " << (int)monmap->min_mon_release
 	    << ", or missing features " << missing << dendl;
     MMonProbe *r = new MMonProbe(monmap->fsid, MMonProbe::OP_MISSING_FEATURES,
 				 name, has_ever_joined, monmap->min_mon_release);
@@ -2046,7 +2050,7 @@ void Monitor::handle_probe_reply(MonOpRequestRef op)
       return;
     }
 
-    unsigned need = monmap->size() / 2 + 1;
+    unsigned need = monmap->min_quorum_size();
     dout(10) << " outside_quorum now " << outside_quorum << ", need " << need << dendl;
     if (outside_quorum.size() >= need) {
       if (outside_quorum.count(name)) {
@@ -2274,7 +2278,6 @@ void Monitor::collect_metadata(Metadata *m)
   // infer storage device
   string devname = store->get_devname();
   set<string> devnames;
-  derr << " devname " << devname << dendl;
   get_raw_devices(devname, &devnames);
   (*m)["devices"] = stringify(devnames);
   string devids;
@@ -3367,7 +3370,10 @@ void Monitor::handle_command(MonOpRequestRef op)
       prefix != "mon sync force" &&
       prefix != "mon metadata" &&
       prefix != "mon versions" &&
-      prefix != "mon count-metadata") {
+      prefix != "mon count-metadata" &&
+      prefix != "mon ok-to-stop" &&
+      prefix != "mon ok-to-add-offline" &&
+      prefix != "mon ok-to-rm") {
     monmon()->dispatch(op);
     return;
   }
@@ -3697,6 +3703,59 @@ void Monitor::handle_command(MonOpRequestRef op)
     rdata.append(ds);
     rs = "";
     r = 0;
+  } else if (prefix == "mon ok-to-stop") {
+    vector<string> ids;
+    if (!cmd_getval(g_ceph_context, cmdmap, "ids", ids)) {
+      r = -EINVAL;
+      goto out;
+    }
+    set<string> wouldbe;
+    for (auto rank : quorum) {
+      wouldbe.insert(monmap->get_name(rank));
+    }
+    for (auto& n : ids) {
+      if (monmap->contains(n)) {
+	wouldbe.erase(n);
+      }
+    }
+    if (wouldbe.size() < monmap->min_quorum_size()) {
+      r = -EBUSY;
+      rs = "not enough monitors would be available (" + stringify(wouldbe) +
+	") after stopping mons " + stringify(ids);
+      goto out;
+    }
+    r = 0;
+    rs = "quorum should be preserved (" + stringify(wouldbe) +
+      ") after stopping " + stringify(ids);
+  } else if (prefix == "mon ok-to-add-offline") {
+    if (quorum.size() < monmap->min_quorum_size(monmap->size() + 1)) {
+      rs = "adding a monitor may break quorum (until that monitor starts)";
+      r = -EBUSY;
+      goto out;
+    }
+    rs = "adding another mon that is not yet online will not break quorum";
+    r = 0;
+  } else if (prefix == "mon ok-to-rm") {
+    string id;
+    if (!cmd_getval(g_ceph_context, cmdmap, "id", id)) {
+      r = -EINVAL;
+      rs = "must specify a monitor id";
+      goto out;
+    }
+    if (!monmap->contains(id)) {
+      r = 0;
+      rs = "mon." + id + " does not exist";
+      goto out;
+    }
+    int rank = monmap->get_rank(id);
+    if (quorum.count(rank) &&
+	quorum.size() - 1 < monmap->min_quorum_size(monmap->size() - 1)) {
+      r = -EBUSY;
+      rs = "removing mon." + id + " would break quorum";
+      goto out;
+    }
+    r = 0;
+    rs = "safe to remove mon." + id;
   } else if (prefix == "mon_status") {
     get_mon_status(f.get(), ds);
     if (f)

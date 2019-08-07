@@ -2,7 +2,15 @@ tasks:
         - exec:
                 client.salt_master:
                         - 'ceph -s'
+<<<<<<< HEAD
         - ses_qa:
         - ses_qa.validation:
                 mgr_plugin_dashboard:
+=======
+        - deepsea.script:
+                mgr.x:
+                        mgr_plugin_dashboard_smoke.sh:
+        - ses_qa:
+        - ses_qa.validation:
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86
                 mgr_plugin_influx:

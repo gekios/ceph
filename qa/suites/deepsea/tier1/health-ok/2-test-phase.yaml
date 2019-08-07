@@ -1,11 +1,20 @@
 tasks:
+<<<<<<< HEAD
         - deepsea.create_pools:
                 write_test:
+=======
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86
         - exec:
                 client.salt_master:
                         - 'ceph -s'
         - deepsea.validation:
+<<<<<<< HEAD
                 rados_write_test:
         - ses_qa:
         - ses_qa.validation:
                 mgr_plugin_dashboard:
+=======
+        - deepsea.toolbox:
+                assert_bluestore:
+                        osd.0:
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86

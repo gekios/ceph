@@ -188,8 +188,13 @@ class Salt(Task):
             rem.run(args=[
                 'sudo',
                 'sed', '--in-place', '--regexp-extended',
+<<<<<<< HEAD
                 '-e', 's/^\s*#\s*log_level:.*$/log_level: debug/g',
                 '-e', '/^\s*#.*$/d', '-e', '/^\s*$/d',
+=======
+                '-e', 's/^\s*#\s*log_level:.*$/log_level: debug/g',  # noqa: W605
+                '-e', '/^\s*#.*$/d', '-e', '/^\s*$/d',               # noqa: W605
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86
                 '/etc/salt/master',
                 '/etc/salt/minion',
             ])
@@ -222,7 +227,13 @@ class Salt(Task):
         log.debug("beginning of end method")
         self.sm.gather_logs('salt')
         self.sm.gather_logs('zypp')
+<<<<<<< HEAD
         self.sm.gather_logfile('zypper.log')
+=======
+        self.sm.gather_logs('rbd-target-api')
+        self.sm.gather_logfile('zypper.log')
+        self.sm.gather_logfile('journalctl.log')
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86
         log.debug("end of end method")
 
     def teardown(self):

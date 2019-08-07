@@ -207,6 +207,7 @@ using ceph::crypto::MD5;
 #define ERR_NO_SUCH_USER         2042
 #define ERR_NO_SUCH_SUBUSER      2043
 #define ERR_MFA_REQUIRED         2044
+#define ERR_NO_SUCH_CORS_CONFIGURATION 2045
 #define ERR_USER_SUSPENDED       2100
 #define ERR_INTERNAL_ERROR       2200
 #define ERR_NOT_IMPLEMENTED      2201
@@ -694,7 +695,7 @@ struct rgw_placement_rule {
 
   void encode(bufferlist& bl) const {
     /* no ENCODE_START/END due to backward compatibility */
-    std::string s = to_str_explicit();
+    std::string s = to_str();
     ceph::encode(s, bl);
   }
 
@@ -719,12 +720,11 @@ struct rgw_placement_rule {
     size_t pos = s.find("/");
     if (pos == std::string::npos) {
       name = s;
+      storage_class.clear();
       return;
     }
     name = s.substr(0, pos);
-    if (pos < s.size() - 1) {
-      storage_class = s.substr(pos + 1);
-    }
+    storage_class = s.substr(pos + 1);
   }
 
   bool standard_storage_class() const {
@@ -2665,6 +2665,18 @@ static inline string rgw_bl_str(ceph::buffer::list& raw)
     s.resize(len);
   }
   return s;
+}
+
+template <typename T>
+int decode_bl(bufferlist& bl, T& t)
+{
+  auto iter = bl.cbegin();
+  try {
+    decode(t, iter);
+  } catch (buffer::error& err) {
+    return -EIO;
+  }
+  return 0;
 }
 
 #endif

@@ -402,6 +402,12 @@ public:
     release_object_locks(manager);
   }
 
+  bool pg_is_repair() override {
+    return is_repair();
+  }
+  void inc_osd_stat_repaired() override {
+    osd->inc_osd_stat_repaired();
+  }
   bool pg_is_remote_backfilling() override {
     return is_remote_backfilling();
   }
@@ -454,6 +460,10 @@ public:
     return is_undersized();
   }
   
+  bool pg_is_repair() const override {
+    return is_repair();
+  }
+
   void update_peer_last_complete_ondisk(
     pg_shard_t fromosd,
     eversion_t lcod) override {
@@ -1375,8 +1385,8 @@ protected:
 
   friend class C_ChecksumRead;
 
-  int do_extent_cmp(OpContext *ctx, OSDOp& osd_op);
-  int finish_extent_cmp(OSDOp& osd_op, const bufferlist &read_bl);
+  int do_extent_cmp(OpContext *ctx, OSDOp& osd_op, bool munged);
+  int finish_extent_cmp(OSDOp& osd_op, const bufferlist &read_bl, bool munged);
 
   friend class C_ExtentCmpRead;
 

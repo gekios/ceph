@@ -5,6 +5,10 @@ Linter:
     flake8 --max-line-length=100
 """
 import logging
+<<<<<<< HEAD
+=======
+import time
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86
 import yaml
 
 from salt_manager import SaltManager
@@ -12,7 +16,13 @@ from scripts import Scripts
 from teuthology import misc
 from util import (
     copy_directory_recursively,
+<<<<<<< HEAD
     get_remote_for_role,
+=======
+    enumerate_osds,
+    get_remote_for_role,
+    get_rpm_pkg_version,
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86
     introspect_roles,
     remote_exec,
     remote_run_script_as_root,
@@ -64,6 +74,12 @@ class DeepSea(Task):
         cli:
             true        deepsea CLI will be used (the default)
             false       deepsea CLI will not be used
+<<<<<<< HEAD
+=======
+        dashboard_ssl:
+            true        deploy MGR dashboard module with SSL (the default)
+            false       deploy MGR dashboard module *without* SSL
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86
         log_anchor      a string (default: "WWWW: ") which will precede
                         log messages emitted at key points during the
                         deployment
@@ -158,6 +174,10 @@ class DeepSea(Task):
             introspect_roles(self.ctx, self.log, quiet=False)
         self.allow_python2 = deepsea_ctx['allow_python2']
         self.alternative_defaults = deepsea_ctx['alternative_defaults']
+<<<<<<< HEAD
+=======
+        self.dashboard_ssl = deepsea_ctx['dashboard_ssl']
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86
         self.deepsea_cli = deepsea_ctx['cli']
         self.dev_env = self.ctx['dev_env']
         self.install_method = deepsea_ctx['install_method']
@@ -381,6 +401,10 @@ class DeepSea(Task):
         if not isinstance(deepsea_ctx['alternative_defaults'], dict):
             raise ConfigError(self.err_prefix + "alternative_defaults must be a dict")
         deepsea_ctx['cli'] = self.config.get('cli', True)
+<<<<<<< HEAD
+=======
+        deepsea_ctx['dashboard_ssl'] = self.config.get('dashboard_ssl', True)
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86
         deepsea_ctx['log_anchor'] = self.config.get('log_anchor', self.log_anchor_str)
         if not isinstance(deepsea_ctx['log_anchor'], str):
             self.log.warning(
@@ -567,6 +591,11 @@ class DeepSea(Task):
             self.log.warning("Problem with ctx summary key? ctx is {}".format(self.ctx))
         if not success:
             self.ctx.cluster.run(args="rpm -qa | sort")
+<<<<<<< HEAD
+=======
+        self.sm.gather_logs('/home/farm/.npm/_logs', 'dashboard-e2e-npm')
+        self.sm.gather_logs('/home/farm/.protractor-report', 'dashboard-e2e-protractor')
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86
         self.log.debug("end of end method")
 
     def teardown(self):
@@ -929,6 +958,18 @@ class Orch(DeepSea):
             cmd += ' 2> /dev/null'
         self.master_remote.run(args=cmd)
 
+<<<<<<< HEAD
+=======
+    def __check_ceph_test_rpm_version(self):
+        """Checks rpm version for ceph and ceph-test; logs warning if differs"""
+        ceph_test_ver = get_rpm_pkg_version(self.master_remote, "ceph-test", self.log)
+        ceph_ver = get_rpm_pkg_version(self.master_remote, "ceph", self.log)
+        if ceph_test_ver != ceph_ver:
+            self.log.warning(
+                "ceph-test rpm version: {} differs from ceph version: {}"
+                .format(ceph_test_ver, ceph_ver))
+
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86
     def __check_salt_api_service(self):
         base_cmd = 'sudo systemctl status --full --lines={} {}.service'
         try:
@@ -984,6 +1025,23 @@ class Orch(DeepSea):
             ganesha_remote = self.remotes[ganesha_host]
             ganesha_remote.run(args="cat /etc/ganesha/ganesha.conf")
 
+<<<<<<< HEAD
+=======
+    def __mgr_dashboard_module_deploy(self):
+        script = ("# deploy MGR dashboard module\n"
+                  "set -ex\n"
+                  "ceph mgr module enable dashboard\n")
+        if self.dashboard_ssl:
+            script += "ceph dashboard create-self-signed-cert\n"
+        else:
+            script += "ceph config set mgr mgr/dashboard/ssl false\n"
+        remote_run_script_as_root(
+            self.master_remote,
+            'mgr_dashboard_module_deploy.sh',
+            script,
+            )
+
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86
     def __zypper_ps_with_possible_reboot(self):
         if self.sm.all_minions_zypper_ps_requires_reboot():
             log_spec = "Detected updates requiring reboot"
@@ -1128,6 +1186,10 @@ class Orch(DeepSea):
         stage = 2
         self.__log_stage_start(stage)
         self._run_orch(("stage", stage))
+<<<<<<< HEAD
+=======
+        self.__check_ceph_test_rpm_version()
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86
         self._pillar_items()
         self.__dump_drive_groups_yml()
 
@@ -1138,6 +1200,10 @@ class Orch(DeepSea):
         stage = 3
         self.__log_stage_start(stage)
         self._run_orch(("stage", stage))
+<<<<<<< HEAD
+=======
+        # self.__mgr_dashboard_module_deploy()
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86
         self.sm.all_minions_cmd_run(
             'cat /etc/ceph/ceph.conf',
             abort_on_fail=False
@@ -1243,19 +1309,26 @@ class Policy(DeepSea):
             ConfigError(self.err_prefix + "unknown drive group ->{}<-"
                         .format(self.drive_group))
 
+<<<<<<< HEAD
     def __roll_out_drive_group(self, fpath="/home/ubuntu/drive_group"):
         # FIXME: this is entirely untested and probably doesn't work
+=======
+    def __roll_out_drive_group(self, fpath="/srv/salt/ceph/configuration/files/drive_groups.yml"):
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86
         misc.sudo_write_file(
             self.master_remote,
             fpath,
             yaml.dump(self.drive_group),
             perms="0644",
             )
+<<<<<<< HEAD
         self.scripts.run(
             self.master_remote,
             'drive_group.sh',
             args=[proposals_dir, fpath]
             )
+=======
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86
 
     def _build_base(self):
         """
@@ -1619,6 +1692,167 @@ class Script(DeepSea):
         pass
 
 
+<<<<<<< HEAD
+=======
+class Toolbox(DeepSea):
+    """
+    A class that contains various miscellaneous routines. For example:
+
+    tasks:
+    - deepsea.toolbox:
+          foo:
+
+    Runs the "foo" tool without any options.
+    """
+
+    err_prefix = '(toolbox subtask) '
+
+    def __init__(self, ctx, config):
+        global deepsea_ctx
+        deepsea_ctx['logger_obj'] = log.getChild('toolbox')
+        self.name = 'deepsea.toolbox'
+        super(Toolbox, self).__init__(ctx, config)
+
+    def _assert_store(self, file_or_blue, teuth_role):
+        """
+        file_or_blue can be either 'bluestore' or 'filestore'
+        teuth_role is an 'osd' role uniquely specifying one of the storage nodes.
+        Enumerates the OSDs on the node and asserts that each of these OSDs is
+        either filestore or bluestore, as appropriate.
+        """
+        remote = get_remote_for_role(self.ctx, teuth_role)
+        osds = enumerate_osds(remote, self.log)
+        self.log.info("Checking if OSDs ->{}<- are ->{}<-".format(osds, file_or_blue))
+        all_green = True
+        for osd in osds:
+            store = remote.sh("sudo ceph osd metadata {} | jq -r .osd_objectstore"
+                              .format(osd)).rstrip()
+            self.log.info("OSD {} is ->{}<-.".format(osd, store))
+            if store != file_or_blue:
+                self.log.warning("OSD {} has objectstore ->{}<- which is not ->{}<-".
+                                 format(osd, store))
+                all_green = False
+        assert all_green, "One or more OSDs is not {}".format(file_or_blue)
+
+    def _noout(self, add_or_rm, teuth_role):
+        """
+        add_or_rm is either 'add' or 'rm'
+        teuth_role is an 'osd' role uniquely specifying one of the storage nodes.
+        Enumerates the OSDs on the node and does 'add-noout' on each of them.
+        """
+        remote = get_remote_for_role(self.ctx, teuth_role)
+        osds = enumerate_osds(remote, self.log)
+        self.log.info("Running {}-noout for OSDs ->{}<-".format(add_or_rm, osds))
+        for osd in osds:
+            remote.sh("sudo ceph osd {}-noout osd.{}".format(add_or_rm, osd))
+
+    def add_noout(self, **kwargs):
+        """
+        Expects one key - a teuthology 'osd' role specifying one of the storage nodes.
+        Enumerates the OSDs on this node and does 'add-noout' on each of them.
+        """
+        role = kwargs.keys()[0]
+        self._noout("add", role)
+
+    def assert_bluestore(self, **kwargs):
+        """
+        Expects one key - a teuthology 'osd' role specifying one of the storage nodes.
+        Enumerates the OSDs on this node and asserts that each one is a bluestore OSD.
+        """
+        role = kwargs.keys()[0]
+        self._assert_store("bluestore", role)
+
+    def assert_filestore(self, **kwargs):
+        """
+        Expects one key - a teuthology 'osd' role specifying one of the storage nodes.
+        Enumerates the OSDs on this node and asserts that each one is a filestore OSD.
+        """
+        role = kwargs.keys()[0]
+        self._assert_store("filestore", role)
+
+    def rm_noout(self, **kwargs):
+        """
+        Expects one key - a teuthology 'osd' role specifying one of the storage nodes.
+        Enumerates the OSDs on this node and does 'rm-noout' on each of them.
+        """
+        role = kwargs.keys()[0]
+        self._noout("rm", role)
+
+    def wait_for_health_ok(self, **kwargs):
+        """
+        Wait for HEALTH_OK - stop after HEALTH_OK is reached or timeout expires.
+        Timeout defaults to 120 minutes, but can be specified by providing a
+        configuration option. For example:
+
+        tasks:
+        - deepsea.toolbox
+            wait_for_health_ok:
+              timeout_minutes: 90
+        """
+        if kwargs:
+            self.log.info("wait_for_health_ok: Considering config dict ->{}<-".format(kwargs))
+            config_keys = len(kwargs)
+            if config_keys > 1:
+                raise ConfigError(
+                    self.err_prefix +
+                    "wait_for_health_ok config dictionary may contain only one key. "
+                    "You provided ->{}<- keys ({})".format(len(config_keys), config_keys)
+                    )
+            timeout_spec, timeout_minutes = kwargs.items()[0]
+        else:
+            timeout_minutes = 120
+        self.log.info("Waiting up to ->{}<- minutes for HEALTH_OK".format(timeout_minutes))
+        remote = get_remote_for_role(self.ctx, "client.salt_master")
+        cluster_status = ""
+        for minute in range(1, timeout_minutes+1):
+            remote.sh("sudo ceph status")
+            cluster_status = remote.sh(
+                "sudo ceph health detail --format json | jq -r '.status'"
+                ).rstrip()
+            if cluster_status == "HEALTH_OK":
+                break
+            self.log.info("Waiting for one minute for cluster to reach HEALTH_OK"
+                          "({} minutes left to timeout)"
+                          .format(timeout_minutes + 1 - minute))
+            time.sleep(60)
+        if cluster_status == "HEALTH_OK":
+            self.log.info(anchored("Cluster is healthy"))
+        else:
+            raise RuntimeError("Cluster still not healthy (current status ->{}<-) "
+                               "after reaching timeout"
+                               .format(cluster_status))
+
+    def begin(self):
+        if not self.config:
+            self.log.warning("empty config: nothing to do")
+            return None
+        self.log.info("Considering config dict ->{}<-".format(self.config))
+        config_keys = len(self.config)
+        if config_keys > 1:
+            raise ConfigError(
+                self.err_prefix +
+                "config dictionary may contain only one key. "
+                "You provided ->{}<- keys ({})".format(len(config_keys), config_keys)
+                )
+        tool_spec, kwargs = self.config.items()[0]
+        kwargs = {} if not kwargs else kwargs
+        method = getattr(self, tool_spec, None)
+        if method:
+            self.log.info("About to run tool ->{}<- from toolbox with config ->{}<-"
+                          .format(tool_spec, kwargs))
+            method(**kwargs)
+        else:
+            raise ConfigError(self.err_prefix + "No such tool ->{}<- in toolbox"
+                              .format(tool_spec))
+
+    def end(self):
+        pass
+
+    def teardown(self):
+        pass
+
+
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86
 class Validation(DeepSea):
     """
     A container for "validation tests", which are understood to mean tests that
@@ -1686,6 +1920,18 @@ class Validation(DeepSea):
             raise ConfigError(self.err_prefix +
                               "ganesha_smoke_test needs a client role, but none was given")
 
+<<<<<<< HEAD
+=======
+    def grafana_service_check(self, **kwargs):
+        grafana = self.role_type_present("grafana")
+        if grafana:
+            remote = self.remotes[grafana]
+            remote.sh('sudo systemctl status grafana-server.service')
+        else:
+            raise ConfigError(self.err_prefix +
+                              "grafana_service_check needs a grafana role, but none was given")
+
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86
     def iscsi_smoke_test(self, **kwargs):
         igw_host = self.role_type_present("igw")
         if igw_host:
@@ -1795,4 +2041,8 @@ policy = Policy
 reboot = Reboot
 repository = Repository
 script = Script
+<<<<<<< HEAD
+=======
+toolbox = Toolbox
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86
 validation = Validation

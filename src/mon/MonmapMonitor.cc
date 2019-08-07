@@ -165,7 +165,7 @@ void MonmapMonitor::apply_mon_features(const mon_feature_t& features,
 
   if (new_features.empty() &&
       pending_map.min_mon_release == min_mon_release) {
-    dout(10) << __func__ << " min_mon_release (" << min_mon_release
+    dout(10) << __func__ << " min_mon_release (" << (int)min_mon_release
 	     << ") and features (" << features << ") match" << dendl;
     return;
   }
@@ -180,7 +180,7 @@ void MonmapMonitor::apply_mon_features(const mon_feature_t& features,
   }
   if (min_mon_release > pending_map.min_mon_release) {
     dout(1) << __func__ << " increasing min_mon_release to "
-	    << min_mon_release << " (" << ceph_release_name(min_mon_release)
+	    << (int)min_mon_release << " (" << ceph_release_name(min_mon_release)
 	    << ")" << dendl;
     pending_map.min_mon_release = min_mon_release;
   }
@@ -909,5 +909,40 @@ void MonmapMonitor::check_sub(Subscription *sub)
     } else {
       sub->next = epoch + 1;
     }
+  }
+}
+
+void MonmapMonitor::tick()
+{
+  if (!is_active() ||
+      !mon->is_leader()) {
+    return;
+  }
+
+  if (mon->monmap->created.is_zero()) {
+    dout(10) << __func__ << " detected empty created stamp" << dendl;
+    utime_t ctime;
+    for (version_t v = 1; v <= get_last_committed(); v++) {
+      bufferlist bl;
+      int r = get_version(v, bl);
+      if (r < 0) {
+	continue;
+      }
+      MonMap m;
+      auto p = bl.cbegin();
+      decode(m, p);
+      if (!m.last_changed.is_zero()) {
+	dout(10) << __func__ << " first monmap with last_changed is "
+		 << v << " with " << m.last_changed << dendl;
+	ctime = m.last_changed;
+	break;
+      }
+    }
+    if (ctime.is_zero()) {
+      ctime = ceph_clock_now();
+    }
+    dout(10) << __func__ << " updating created stamp to " << ctime << dendl;
+    pending_map.created = ctime;
+    propose_pending();
   }
 }

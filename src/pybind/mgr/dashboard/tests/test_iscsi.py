@@ -98,8 +98,8 @@ class IscsiTest(ControllerTestCase, CLICommandTestMixin):
         self.assertStatus(200)
         self.assertJsonBody([])
 
-    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image_exists')
-    def test_list(self, _validate_image_exists_mock):
+    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image')
+    def test_list(self, _validate_image_mock):
         target_iqn = "iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw1"
         request = copy.deepcopy(iscsi_target_request)
         request['target_iqn'] = target_iqn
@@ -111,8 +111,8 @@ class IscsiTest(ControllerTestCase, CLICommandTestMixin):
         response['target_iqn'] = target_iqn
         self.assertJsonBody([response])
 
-    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image_exists')
-    def test_create(self, _validate_image_exists_mock):
+    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image')
+    def test_create(self, _validate_image_mock):
         target_iqn = "iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw2"
         request = copy.deepcopy(iscsi_target_request)
         request['target_iqn'] = target_iqn
@@ -124,8 +124,8 @@ class IscsiTest(ControllerTestCase, CLICommandTestMixin):
         response['target_iqn'] = target_iqn
         self.assertJsonBody(response)
 
-    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image_exists')
-    def test_delete(self, _validate_image_exists_mock):
+    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image')
+    def test_delete(self, _validate_image_mock):
         target_iqn = "iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw3"
         request = copy.deepcopy(iscsi_target_request)
         request['target_iqn'] = target_iqn
@@ -137,8 +137,8 @@ class IscsiTest(ControllerTestCase, CLICommandTestMixin):
         self.assertStatus(200)
         self.assertJsonBody([])
 
-    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image_exists')
-    def test_add_client(self, _validate_image_exists_mock):
+    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image')
+    def test_add_client(self, _validate_image_mock):
         target_iqn = "iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw4"
         create_request = copy.deepcopy(iscsi_target_request)
         create_request['target_iqn'] = target_iqn
@@ -168,8 +168,8 @@ class IscsiTest(ControllerTestCase, CLICommandTestMixin):
             })
         self._update_iscsi_target(create_request, update_request, response)
 
-    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image_exists')
-    def test_change_client_password(self, _validate_image_exists_mock):
+    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image')
+    def test_change_client_password(self, _validate_image_mock):
         target_iqn = "iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw5"
         create_request = copy.deepcopy(iscsi_target_request)
         create_request['target_iqn'] = target_iqn
@@ -181,8 +181,8 @@ class IscsiTest(ControllerTestCase, CLICommandTestMixin):
         response['clients'][0]['auth']['password'] = 'mynewiscsipassword'
         self._update_iscsi_target(create_request, update_request, response)
 
-    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image_exists')
-    def test_rename_client(self, _validate_image_exists_mock):
+    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image')
+    def test_rename_client(self, _validate_image_mock):
         target_iqn = "iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw6"
         create_request = copy.deepcopy(iscsi_target_request)
         create_request['target_iqn'] = target_iqn
@@ -194,8 +194,8 @@ class IscsiTest(ControllerTestCase, CLICommandTestMixin):
         response['clients'][0]['client_iqn'] = 'iqn.1994-05.com.redhat:rh7-client0'
         self._update_iscsi_target(create_request, update_request, response)
 
-    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image_exists')
-    def test_add_disk(self, _validate_image_exists_mock):
+    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image')
+    def test_add_disk(self, _validate_image_mock):
         target_iqn = "iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw7"
         create_request = copy.deepcopy(iscsi_target_request)
         create_request['target_iqn'] = target_iqn
@@ -221,8 +221,8 @@ class IscsiTest(ControllerTestCase, CLICommandTestMixin):
         response['clients'][0]['luns'].append({"image": "lun3", "pool": "rbd"})
         self._update_iscsi_target(create_request, update_request, response)
 
-    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image_exists')
-    def test_change_disk_image(self, _validate_image_exists_mock):
+    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image')
+    def test_change_disk_image(self, _validate_image_mock):
         target_iqn = "iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw8"
         create_request = copy.deepcopy(iscsi_target_request)
         create_request['target_iqn'] = target_iqn
@@ -236,8 +236,8 @@ class IscsiTest(ControllerTestCase, CLICommandTestMixin):
         response['clients'][0]['luns'][0]['image'] = 'lun0'
         self._update_iscsi_target(create_request, update_request, response)
 
-    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image_exists')
-    def test_change_disk_controls(self, _validate_image_exists_mock):
+    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image')
+    def test_change_disk_controls(self, _validate_image_mock):
         target_iqn = "iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw9"
         create_request = copy.deepcopy(iscsi_target_request)
         create_request['target_iqn'] = target_iqn
@@ -249,8 +249,8 @@ class IscsiTest(ControllerTestCase, CLICommandTestMixin):
         response['disks'][0]['controls'] = {"qfull_timeout": 15}
         self._update_iscsi_target(create_request, update_request, response)
 
-    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image_exists')
-    def test_rename_target(self, _validate_image_exists_mock):
+    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image')
+    def test_rename_target(self, _validate_image_mock):
         target_iqn = "iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw10"
         new_target_iqn = "iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw11"
         create_request = copy.deepcopy(iscsi_target_request)
@@ -261,8 +261,8 @@ class IscsiTest(ControllerTestCase, CLICommandTestMixin):
         response['target_iqn'] = new_target_iqn
         self._update_iscsi_target(create_request, update_request, response)
 
-    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image_exists')
-    def test_rename_group(self, _validate_image_exists_mock):
+    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image')
+    def test_rename_group(self, _validate_image_mock):
         target_iqn = "iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw12"
         create_request = copy.deepcopy(iscsi_target_request)
         create_request['target_iqn'] = target_iqn
@@ -274,8 +274,8 @@ class IscsiTest(ControllerTestCase, CLICommandTestMixin):
         response['groups'][0]['group_id'] = 'mygroup0'
         self._update_iscsi_target(create_request, update_request, response)
 
-    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image_exists')
-    def test_add_client_to_group(self, _validate_image_exists_mock):
+    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image')
+    def test_add_client_to_group(self, _validate_image_mock):
         target_iqn = "iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw13"
         create_request = copy.deepcopy(iscsi_target_request)
         create_request['target_iqn'] = target_iqn
@@ -307,8 +307,8 @@ class IscsiTest(ControllerTestCase, CLICommandTestMixin):
         response['groups'][0]['members'].append('iqn.1994-05.com.redhat:rh7-client3')
         self._update_iscsi_target(create_request, update_request, response)
 
-    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image_exists')
-    def test_remove_client_from_group(self, _validate_image_exists_mock):
+    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image')
+    def test_remove_client_from_group(self, _validate_image_mock):
         target_iqn = "iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw14"
         create_request = copy.deepcopy(iscsi_target_request)
         create_request['target_iqn'] = target_iqn
@@ -320,8 +320,8 @@ class IscsiTest(ControllerTestCase, CLICommandTestMixin):
         response['groups'][0]['members'].remove('iqn.1994-05.com.redhat:rh7-client2')
         self._update_iscsi_target(create_request, update_request, response)
 
-    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image_exists')
-    def test_remove_groups(self, _validate_image_exists_mock):
+    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image')
+    def test_remove_groups(self, _validate_image_mock):
         target_iqn = "iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw15"
         create_request = copy.deepcopy(iscsi_target_request)
         create_request['target_iqn'] = target_iqn
@@ -332,6 +332,21 @@ class IscsiTest(ControllerTestCase, CLICommandTestMixin):
         response['target_iqn'] = target_iqn
         response['groups'] = []
         self._update_iscsi_target(create_request, update_request, response)
+
+    @mock.patch('dashboard.controllers.iscsi.IscsiTarget._validate_image')
+    def test_add_client_to_multiple_groups(self, _validate_image_mock):
+        target_iqn = "iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw16"
+        create_request = copy.deepcopy(iscsi_target_request)
+        create_request['target_iqn'] = target_iqn
+        create_request['groups'].append(copy.deepcopy(create_request['groups'][0]))
+        create_request['groups'][1]['group_id'] = 'mygroup2'
+        self._post('/api/iscsi/target', create_request)
+        self.assertStatus(400)
+        self.assertJsonBody({
+            'detail': 'Each initiator can only be part of 1 group at a time',
+            'code': 'initiator_in_multiple_groups',
+            'component': 'iscsi'
+        })
 
     def _update_iscsi_target(self, create_request, update_request, response):
         self._post('/api/iscsi/target', create_request)
@@ -431,7 +446,10 @@ iscsi_target_response = {
             'members': ['iqn.1994-05.com.redhat:rh7-client2']
         }
     ],
-    'target_controls': {}
+    'target_controls': {},
+    'info': {
+        'num_sessions': 0
+    }
 }
 
 
@@ -481,6 +499,14 @@ class IscsiClientMock(object):
                 "minimum_gateways": 2
             },
             "default_backstore": "user:rbd",
+            "required_rbd_features": {
+                "rbd": 0,
+                "user:rbd": 4,
+            },
+            "unsupported_rbd_features": {
+                "rbd": 88,
+                "user:rbd": 0,
+            },
             "disk_default_controls": {
                 "user:rbd": {
                     "hw_max_sectors": 1024,
@@ -627,3 +653,8 @@ class IscsiClientMock(object):
 
     def update_targetauth(self, target_iqn, action):
         self.config['targets'][target_iqn]['acl_enabled'] = (action == 'enable_acl')
+
+    def get_targetinfo(self, _):
+        return {
+            'num_sessions': 0
+        }

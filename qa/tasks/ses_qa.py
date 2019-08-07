@@ -16,6 +16,11 @@ from teuthology.task import Task
 
 log = logging.getLogger(__name__)
 ses_qa_ctx = {}
+<<<<<<< HEAD
+=======
+number_of_osds_in_cluster = """sudo ceph osd tree -f json-pretty |
+                               jq '[.nodes[] | select(.type == \"osd\")] | length'"""
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86
 
 
 class SESQA(Task):
@@ -64,6 +69,11 @@ class SESQA(Task):
 
     def end(self):
         super(SESQA, self).end()
+<<<<<<< HEAD
+=======
+        self.sm.gather_logs('/home/farm/.npm/_logs', 'dashboard-e2e-npm')
+        self.sm.gather_logs('/home/farm/.protractor-report', 'dashboard-e2e-protractor')
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86
 
     def teardown(self):
         super(SESQA, self).teardown()
@@ -80,6 +90,7 @@ class Validation(SESQA):
         super(Validation, self).__init__(ctx, config)
         self.log.debug("munged config is {}".format(self.config))
 
+<<<<<<< HEAD
     def mgr_plugin_dashboard(self, **kwargs):
         """
         Minimal/smoke test for the MGR dashboard plugin
@@ -89,6 +100,8 @@ class Validation(SESQA):
             'mgr_plugin_dashboard_smoke.sh',
             )
 
+=======
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86
     def mgr_plugin_influx(self, **kwargs):
         """
         Minimal/smoke test for the MGR influx plugin
@@ -132,7 +145,11 @@ class Validation(SESQA):
             if not isinstance(kwargs, dict):
                 raise ConfigError(self.err_prefix + "Method config must be a dict")
             self.log.info(
+<<<<<<< HEAD
                 "Running MGR plugin test {} with config ->{}<-"
+=======
+                "Running test {} with config ->{}<-"
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86
                 .format(method_spec, kwargs)
                 )
             method = getattr(self, method_spec, None)
@@ -142,6 +159,39 @@ class Validation(SESQA):
                 raise ConfigError(self.err_prefix + "No such method ->{}<-"
                                   .format(method_spec))
 
+<<<<<<< HEAD
+=======
+    def drive_replace_initiate(self, **kwargs):
+        """
+        Initiate Deepsea drive replacement
+
+        Assumes there is 1 drive not being deployed (1node5disks - with DriveGroup `limit: 4`)
+
+        In order to "hide" an existing disk from the ceph.c_v in teuthology
+        the disk is formatted and mounted.
+        """
+        # :TODO: make this random and find correct disk device
+        osd_id = "2"
+        total_osds = self.master_remote.sh(number_of_osds_in_cluster)
+        assert int(total_osds) == 4, "Unexpected number of osds {} (expected 4)".format(total_osds)
+        self.master_remote.sh("sudo ceph osd tree --format json | tee before.json")
+        self.master_remote.sh("sudo salt-run osd.replace {} 2>/dev/null".format(osd_id))
+        self.master_remote.sh("sudo mkfs.ext4 -F /dev/vdd; sudo mount /dev/vdd /mnt")
+        self.master_remote.sh("sudo salt-run disks.c_v_commands 2>/dev/null")
+        # Output is like: ceph-volume lvm batch --no-auto /dev/vdf --yes --osd-ids 2
+
+    def drive_replace_check(self, **kwargs):
+        """
+        Deepsea drive replacement after check
+
+        Replaced osd_id should be back in the osd tree once stage.3 is ran
+        """
+        total_osds = self.master_remote.sh(number_of_osds_in_cluster)
+        assert int(total_osds) == 4, "Unexpected number of osds {} (expected 4)".format(total_osds)
+        self.master_remote.sh("sudo ceph osd tree --format json | tee after.json")
+        self.master_remote.sh("diff before.json after.json && echo 'Drive Replaced OK'")
+
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86
 
 task = SESQA
 validation = Validation

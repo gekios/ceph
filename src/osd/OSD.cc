@@ -444,6 +444,11 @@ void OSDService::start_shutdown()
     std::lock_guard l(sleep_lock);
     sleep_timer.shutdown();
   }
+
+  {
+    std::lock_guard l(recovery_request_lock);
+    recovery_request_timer.shutdown();
+  }
 }
 
 void OSDService::shutdown_reserver()
@@ -465,12 +470,7 @@ void OSDService::shutdown()
     f->stop();
   }
 
-  {
-    std::lock_guard l(recovery_request_lock);
-    recovery_request_timer.shutdown();
-  }
-
-  osdmap = OSDMapRef();
+  publish_map(OSDMapRef());
   next_osdmap = OSDMapRef();
 }
 
@@ -944,6 +944,13 @@ osd_stat_t OSDService::set_osd_stat(vector<int>& hb_peers,
   osd->op_tracker.get_age_ms_histogram(&osd_stat.op_queue_age_hist);
   osd_stat.num_pgs = num_pgs;
   return osd_stat;
+}
+
+void OSDService::inc_osd_stat_repaired()
+{
+  std::lock_guard l(stat_lock);
+  osd_stat.num_shards_repaired++;
+  return;
 }
 
 float OSDService::compute_adjusted_ratio(osd_stat_t new_stat, float *pratio,
@@ -3952,7 +3959,10 @@ int OSD::shutdown()
   monc->shutdown();
   osd_lock.Unlock();
 
+  map_lock.get_write();
   osdmap = OSDMapRef();
+  map_lock.put_write();
+
   for (auto s : shards) {
     std::lock_guard l(s->osdmap_lock);
     s->shard_osdmap = OSDMapRef();

@@ -572,6 +572,9 @@ int md_config_t::parse_argv(ConfigValues& values,
     else if (ceph_argparse_flag(args, i, "--no-mon-config", (char*)NULL)) {
       values.no_mon_config = true;
     }
+    else if (ceph_argparse_flag(args, i, "--log-early", (char*)NULL)) {
+      values.log_early = true;
+    }
     else if (ceph_argparse_flag(args, i, "--mon-config", (char*)NULL)) {
       values.no_mon_config = false;
     }
@@ -676,7 +679,17 @@ int md_config_t::parse_option(ConfigValues& values,
     std::string as_option("--");
     as_option += opt.name;
     option_name = opt.name;
-    if (opt.type == Option::TYPE_BOOL) {
+    if (ceph_argparse_witharg(
+	  args, i, &val, err,
+	  string(string("--default-") + opt.name).c_str(), (char*)NULL)) {
+      if (!err.str().empty()) {
+        error_message = err.str();
+	ret = -EINVAL;
+	break;
+      }
+      ret = _set_val(values, tracker,  val, opt, CONF_DEFAULT, &error_message);
+      break;
+    } else if (opt.type == Option::TYPE_BOOL) {
       int res;
       if (ceph_argparse_binary_flag(args, i, &res, oss, as_option.c_str(),
 				    (char*)NULL)) {

@@ -230,6 +230,25 @@ Example:
       Some <strong>helper</strong> html text
     </cd-helper>
 
+Terminology and wording
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Instead of using the Ceph component names, the approach
+suggested is to use the logical/generic names (Block over RBD, Filesystem over
+CephFS, Object over RGW). Nevertheless, as Ceph-Dashboard cannot completely hide
+the Ceph internals, some Ceph-specific names might remain visible.
+
+Regarding the wording for action labels and other textual elements (form titles,
+buttons, etc.), the chosen approach is to follow `these guidelines
+<https://www.patternfly.org/styles/terminology-and-wording/#terminology-and-wording-for-action-labels>`_.
+As a rule of thumb, 'Create' and 'Delete' are the proper wording for most forms,
+instead of 'Add' and 'Remove', unless some already created item is either added
+or removed to/from a set of items (e.g.: 'Add permission' to a user vs. 'Create
+(new) permission').
+
+In order to enforce the use of this wording, a service ``ActionLabelsI18n`` has
+been created, which provides translated labels for use in UI elements.
+    
 Frontend branding
 ~~~~~~~~~~~~~~~~~
 
@@ -306,9 +325,16 @@ uncommitted translations.
 Supported languages
 ~~~~~~~~~~~~~~~~~~~
 
-All our supported languages should be registeredd in
-``supported-languages.enum.ts``, this will then provide that list to both the
-language selectors in the frontend.
+All our supported languages should be registered in both exports in
+``supported-languages.enum.ts`` and have a corresponding test in
+``language-selector.component.spec.ts``.
+
+The ``SupportedLanguages`` enum will provide the list for the default language selection.
+
+The ``languageBootstrapMapping`` variable will provide the
+`language support <https://github.com/valor-software/ngx-bootstrap/tree/development/src/chronos/i18n>`_
+for ngx-bootstrap components like the
+`date picker <https://valor-software.com/ngx-bootstrap/#/datepicker#locales>`_.
 
 Translating process
 ~~~~~~~~~~~~~~~~~~~

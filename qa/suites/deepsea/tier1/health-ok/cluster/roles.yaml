@@ -1,2 +1,6 @@
 roles:
+<<<<<<< HEAD
   - [client.salt_master, mon.a, mgr.x, osd.0]
+=======
+  - [client.salt_master, mon.a, mgr.x, osd.0, prometheus.p, grafana.g]
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86

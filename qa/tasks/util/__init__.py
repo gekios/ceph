@@ -1,3 +1,5 @@
+import json
+
 from teuthology import misc
 from teuthology.contextutil import safe_while
 from teuthology.exceptions import (
@@ -6,6 +8,23 @@ from teuthology.exceptions import (
     ConnectionLostError,
     )
 
+<<<<<<< HEAD
+=======
+
+def enumerate_osds(remote, logger):
+    """
+    Given a remote, enumerates the OSDs (if any) running on the machine
+    associated with that role.
+    """
+    hostname = remote.hostname
+    logger.info("Enumerating OSDs on {}".format(hostname))
+    cmd = ("sudo ceph osd tree -f json | "
+           "jq -c '[.nodes[] | select(.name == \"{}\")][0].children'"
+           .format(hostname.split(".")[0]))
+    osds = json.loads(remote.sh(cmd))
+    return osds
+
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86
 
 def get_remote(ctx, cluster, service_type, service_id):
     """
@@ -216,8 +235,14 @@ def remote_exec(remote, cmd_str, logger, log_spec, quiet=True, rerun=False, trie
                 remote.run(args=cmd_str)
                 break
             except CommandFailedError:
+<<<<<<< HEAD
                 logger.error("{} failed. Here comes journalctl!".format(log_spec))
                 remote.run(args="sudo journalctl --all")
+=======
+                logger.error(("{} failed. Creating /var/log/journalctl.log with "
+                              "output of \"journalctl --all\"!").format(log_spec))
+                remote.sh("sudo journalctl --all > /var/log/journalctl.log")
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86
                 raise
             except ConnectionLostError:
                 already_rebooted_at_least_once = True
@@ -258,3 +283,16 @@ def sudo_append_to_file(remote, path, data):
         ],
         stdin=data,
     )
+<<<<<<< HEAD
+=======
+
+
+def get_rpm_pkg_version(remote, pkg, logger):
+    """Gather RPM package version"""
+    version = None
+    try:
+        version = remote.sh('rpm --queryformat="%{{VERSION}}" -q {}'.format(pkg))
+    except CommandFailedError:
+        logger.warning("Package {} is not installed".format(pkg))
+    return version
+>>>>>>> 127a491ad8198341ff090f406c404b9bcd819d86
