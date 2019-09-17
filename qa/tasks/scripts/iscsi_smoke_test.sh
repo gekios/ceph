@@ -1,5 +1,20 @@
 # iSCSI Gateway smoke test
 set -x
+
+# Added optional --upgrade argument which checks the existing
+# file that was created and created a new one
+TEMP=$(getopt -o h --long "upgrade" -- "$@")
+if [ $? != 0 ] ; then echo "Terminating..." >&2 ; exit 1 ; fi
+UPG=false
+eval set -- "$TEMP"
+while true ; do
+    case "$1" in
+        --upgrade | --up) UPG=true ; shift ;;
+        --) shift ; break ;;
+        *) echo "Internal error" ; false ;;
+    esac
+done
+
 rpm -q lrbd
 lrbd --output
 ls -lR /sys/kernel/config/target/
@@ -25,17 +40,26 @@ iscsiadm -m node -L all
 sleep 5
 ls -l /dev/disk/by-path
 ls -l /dev/disk/by-*id
-if ( mkfs -t xfs /dev/disk/by-path/*iscsi* ) ; then
-    :
+if [  "$UPG" = false ]; then
+  if ( mkfs -t xfs /dev/disk/by-path/*iscsi* ) ; then
+      :
+  else
+      dmesg
+      false
+  fi
+  test -d /mnt
+  mount /dev/disk/by-path/*iscsi* /mnt
+  df -h /mnt
+  echo hubba > /mnt/bubba
+  test -s /mnt/bubba
 else
-    dmesg
-    false
+  test -d /mnt
+  mount /dev/disk/by-path/*iscsi* /mnt
+  df -h /mnt
+  test -s /mnt/bubba
+  echo sanity_test > /mnt/testfile
+  test -s /mnt/testfile
 fi
-test -d /mnt
-mount /dev/disk/by-path/*iscsi* /mnt
-df -h /mnt
-echo hubba > /mnt/bubba
-test -s /mnt/bubba
 umount /mnt
 iscsiadm -m node --logout
 echo "OK" >/dev/null
