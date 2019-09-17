@@ -99,19 +99,12 @@ tasks:
         stage: 1
 - deepsea.orch:
         stage: 2
-<<<<<<< HEAD
-- deepsea.orch:
-        stage: 3
-- deepsea.orch:
-        stage: 4
-=======
 - exec:
         client.salt_master:
                 - 'DEV_ENV=true salt-run state.orch ceph.stage.3'
 - exec:
         client.salt_master:
                 - 'salt-run state.orch ceph.stage.4'
->>>>>>> 25232310a3... Work In Progress - Will be split
 - exec:
         client.salt_master:
                 - 'ceph -s'

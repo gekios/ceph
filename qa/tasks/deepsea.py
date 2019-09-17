@@ -1,4 +1,4 @@
-"""
+""" 
 Task (and subtasks) for automating deployment of Ceph using DeepSea
 
 Linter:
@@ -1412,6 +1412,16 @@ class Policy(DeepSea):
         cmd_str = "ls -l {}/policy.cfg".format(proposals_dir)
         self.master_remote.run(args=cmd_str)
 
+    def post_upgrade_policy(self):
+        """
+        Make the necessary changes to policy.cfg so it's compatible with ses6
+        """
+        for hostname in self.nodes_storage:
+            self.master_remote.sh("sudo bash -c 'echo role-storage/cluster/{}.sls >> {}/policy.cfg'".format(hostname, proposals_dir))
+        self.master_remote.sh("sudo bash -c 'sed -i '/profile/d' {}/policy.cfg'".format(proposals_dir))
+        self.master_remote.sh("sudo bash -c 'sed -i '/openattic/d' {}/policy.cfg'".format(proposals_dir))
+        self._cat_policy_cfg()
+
     def begin(self):
         """
         Generate policy.cfg from the results of role introspection
@@ -1430,6 +1440,8 @@ class Policy(DeepSea):
                         'proposals_remove_storage_only_node.sh',
                         args=[proposals_dir, delete_me, self.storage_profile],
                         )
+                if k == 'post_upgrade_policy':
+                    self.post_upgrade_policy()
                 else:
                     raise ConfigError(self.err_prefix + "unrecognized "
                                       "munge_profile directive {}".format(k))
@@ -1811,6 +1823,65 @@ class Toolbox(DeepSea):
             raise RuntimeError("Migration of node {} failed".format(remote.hostname))
         remote.sh('zypper packages --orphaned')
 
+    def cephfs_sanity_test(self, **kwargs):
+        """
+        The funtion expects 'client' teuthology role to be present.
+        Then it mounts cephfs volume using a random mon as mount point and checks
+        if the file that was created by nfs-ganesha smoke-test is there 
+        """
+        self.log.info(anchored("Running Cephfs sanity test"))
+        secret = self.master_remote.sh("sudo grep 'key =' /etc/ceph/ceph.client.admin.keyring ").split()[2]
+        remote = get_remote_for_role(self.ctx, "client.0")
+        testmon = self.role_type_present("mon")
+        remote.sh("sudo test -d /mnt")
+        remote.sh("sudo mount -t ceph {}:/ /mnt -o name=admin,secret={}".format(testmon, secret))
+        remote.sh("sudo test -f /mnt/bubba")
+        remote.sh("sudo bash -c 'echo cephfs sanity test > /mnt/testfile'")
+        remote.sh("sudo test -f /mnt/testfile")
+        remote.sh("sudo umount /mnt")
+        self.log.info("Cephfs sanity test result : OK")
+
+    def ganesha_sanity_test(self):
+        """
+        Connect to nfs-ganesha mode and create and then remove a file
+        mounts with options nfs nfs3 and nfs4 
+        """
+        nfs_v = ["", "nfsvers=3" , "nfsvers=4"]
+        self.log.info(anchored("Running NFS sanity test"))
+        remote = get_remote_for_role(self.ctx, "client.0")
+        ganesha = self.role_type_present("ganesha")
+        remote.sh("sudo zypper --non-interactive --no-gpg-checks install --force --no-recommends nfs-client")
+        remote.sh("sudo test '!' -e /root/mnt")
+        remote.sh("sudo mkdir /root/mnt")
+        for version in nfs_v:
+            self.log.info("Testing nfs ganesha for version {}".format(version))
+            remote.sh("sudo test -d /root/mnt")
+            remote.sh("sudo mount -t nfs -o sync,{} {}:/ /root/mnt".format(version, ganesha))
+            remote.sh("sudo ls -lR /root/mnt")
+            if version == "nfsvers=3":
+                remote.sh("sudo test -f /root/mnt/bubba")
+                remote.sh("sudo touch /root/mnt/saturn")
+                remote.sh("sudo test -f /root/mnt/saturn")
+                remote.sh("sudo rm -f /root/mnt/saturn")
+            else:
+                remote.sh("sudo test -f /root/mnt/cephfs/bubba")
+                remote.sh("sudo touch /root/mnt/cephfs/saturn")
+                remote.sh("sudo test -f /root/mnt/cephfs/saturn")
+                remote.sh("sudo rm -f /root/mnt/cephfs/saturn")
+            remote.sh("sudo umount /root/mnt")
+        remote.sh("sudo rm -rf /root/mnt")
+        self.log.info("nfs-ganesha sanity test result : OK")
+
+
+    def remove_openattic(self, **kwargs):
+        self.log.info("Removing openattic service")
+        oa_host = self.role_type_present("openattic")
+        if oa_host:
+            remote = self.remotes[oa_host]
+            self.master_remote.sh("sudo salt {} state.apply ceph.rescind.openattic".format(remote.hostname))
+            self.master_remote.sh("sudo salt {} state.apply ceph.remove.openattic".format(remote.hostname))
+
+
     def rm_noout(self, **kwargs):
         """
         Expects one key - a teuthology 'osd' role specifying one of the storage nodes.
@@ -1938,12 +2009,22 @@ class Validation(DeepSea):
 
     def iscsi_smoke_test(self, **kwargs):
         igw_host = self.role_type_present("igw")
-        if igw_host:
-            remote = self.remotes[igw_host]
-            self.scripts.run(
-                remote,
-                'iscsi_smoke_test.sh',
-                )
+        if not kwargs:
+            if igw_host:
+                remote = self.remotes[igw_host]
+                self.scripts.run(
+                    remote,
+                    'iscsi_smoke_test.sh',
+                    )
+        else:
+            if igw_host:
+                remote = self.remotes[igw_host]
+                self.scripts.run(
+                    remote,
+                    'iscsi_smoke_test.sh',
+                    args=[kwargs.keys()[0]]
+                    )
+            
 
     def openattic_smoke_test(self, **kwargs):
         oa_host = self.role_type_present("openattic")
