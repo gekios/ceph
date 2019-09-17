@@ -1,4 +1,10 @@
 roles:
+<<<<<<< HEAD
   - [client.salt_master]
-  - [mon.a, mgr.x, osd.0, mds.0, rgw.0, openattic.0]
+  - [mon.a, mgr.x, osd.0, mds.0, rgw.0, igw.0, ganesha.0, openattic.0]
+  - [osd.1, client.0]
+=======
+  - [client.salt_master, openattic.0, client.0]
+  - [mon.a, mgr.x, osd.0, mds.0, rgw.0, igw.0, ganesha.0]
   - [osd.1]
+>>>>>>> 25232310a3... Work In Progress - Will be split
