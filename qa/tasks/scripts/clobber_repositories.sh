@@ -2,7 +2,6 @@
 #
 # args: some repositories in format name:url
 #
-# TODO: priority
 
 set -ex
 
@@ -18,10 +17,11 @@ cp -a /etc/zypp/repos.d /etc/zypp/repos.d.bck
 rm -f /etc/zypp/repos.d/*
 
 for repo_spec in "$@" ; do
+	repo_url=${repo_spec#*:}
+	repo_name=${repo_spec%%:*}
     if [[ "$repo_spec" =~ '!' ]] ; then
-        repo_name=$(echo $repo_spec | sed -e 's/\!.*$//')
-        repo_prio=$(echo $repo_spec | sed -e 's/^.*\!\([[:digit:]]\+\)\:.*$/\1/')
-        repo_url=$(echo $repo_spec | sed -e 's/^.*\:\(http:.*$\)/\1/')
+	repo_prio=${repo_name#*\!}
+	repo_name=${repo_name%\!*}
         zypper \
             --non-interactive \
             addrepo \
@@ -31,8 +31,6 @@ for repo_spec in "$@" ; do
             $repo_url \
             $repo_name
     else
-        repo_name=$(echo $repo_spec | sed -e 's/\:.*$//')
-        repo_url=$(echo $repo_spec | sed -e 's/^.*\:\(http:.*$\)/\1/')
         zypper \
             --non-interactive \
             addrepo \
