@@ -1148,6 +1148,17 @@ class Orch(DeepSea):
         self.log.info("Not allowing reboots for this orchestration")
         return False
 
+    def __dump_lvm_status(self):
+        self.log.info("Dumping LVM status on storage nodes ->{}<-"
+                      .format(self.nodes_storage))
+        for hostname in self.nodes_storage:
+            remote = self.remotes[hostname]
+            self.scripts.run(
+                remote,
+                'lvm_status.sh',
+                )
+
+
     def _run_stage_0(self):
         """
         Run Stage 0
@@ -1190,7 +1201,11 @@ class Orch(DeepSea):
             'cat /etc/ceph/ceph.conf',
             abort_on_fail=False
             )
-        self.__lsblk_and_ceph_disk_list()
+        version = self.master_remote.sh('sudo bash scripts/os_version.sh').split('.')[0]
+        if version == "15":
+            self.__dump_lvm_status()
+        else:
+            self.__lsblk_and_ceph_disk_list()
         self.scripts.run(
             self.master_remote,
             'ceph_cluster_status.sh',
@@ -1202,15 +1217,17 @@ class Orch(DeepSea):
         Run Stage 4
         """
         stage = 4
-        if self.role_type_present("ganesha"):
-            self._nfs_ganesha_no_root_squash()
-        igw_host = self.role_type_present("igw")
-        if igw_host:
-            igw_remote = self.remotes[igw_host]
-            self.scripts.run(
-                igw_remote,
-                'enable_targetcli_debug_logging.sh',
-                )
+        version = self.master_remote.sh('sudo bash scripts/os_version.sh').split('.')[0]
+        if version == "12":
+            if self.role_type_present("ganesha"):
+                self._nfs_ganesha_no_root_squash()
+            igw_host = self.role_type_present("igw")
+            if igw_host:
+                igw_remote = self.remotes[igw_host]
+                self.scripts.run(
+                    igw_remote,
+                    'enable_targetcli_debug_logging.sh',
+                    )
         self.__log_stage_start(stage)
         self._run_orch(("stage", stage))
         self.__maybe_cat_ganesha_conf()
