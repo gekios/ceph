@@ -36,5 +36,9 @@ class Scripts:
         if as_root:
             cmd = "sudo " + cmd
         if args:
-            cmd += ' ' + ' '.join(args)
-        remote.run(label=script_name, args=cmd)
+            cmd += ' ' + ' '.join(map(str, args))
+        if class_name == 'Cluster':
+            retval = remote.run(label=script_name, args=cmd)
+        else:
+            retval = remote.sh(cmd, label=script_name)
+        return retval
