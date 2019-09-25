@@ -9,7 +9,7 @@ tasks:
                         osd.0:
         - exec:
                 client.salt_master:
-                       - 'rados bench -p foo 1 write -b 4096 --no-cleanup'
+                       - 'rados bench -p foo 50 write -b 4096 --no-cleanup'
         - exec:
                 client.salt_master:
                         - sed -i 's/filestore/bluestore/g' /srv/salt/ceph/configuration/files/drive_groups.yml
