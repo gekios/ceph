@@ -5,6 +5,7 @@ tasks:
                 - 'echo "Salt Master node, pre-upgrade"'
                 - 'cat /etc/os-release'
 - deepsea.install_migration_rpm:
+        rpm: SLES15-SES-Migration
 - deepsea.repository:
         client.salt_master:
 - deepsea.reboot:

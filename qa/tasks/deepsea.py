@@ -879,12 +879,8 @@ class HealthOK(DeepSea):
 class InstallMigrationRPM(DeepSea):
 
     err_prefix = "(install_migration_rpm subtask) "
-
-    # rpm_location = "http://download.suse.de/ibs/Devel:/Storage:/5.0:/Testing/images/x86_64/"
-    rpm_location = ("http://51.68.80.25/artifacts/ci/"
-                    "smithfarm:Devel:Storage:5.0:Testing-images/x86_64/")
-
-    rpm_name = "SLES15-Migration"
+    rpm_name = "SLES15-SES-Migration"
+    rpm_location = None
 
     def __init__(self, ctx, config):
         global deepsea_ctx
@@ -898,7 +894,7 @@ class InstallMigrationRPM(DeepSea):
         misc.sh("sudo apt-get -y update && sudo apt-get --yes install lynx")
         misc.sh("type lynx")
 
-    def _migration_rpm_url(self):
+    def _migration_rpm_url(self, rpm_name, rpm_location):
         """Given the location and name of the migration RPM, determine the URL"""
         cmd = ("lynx --dump -listonly {url} ".format(url=self.rpm_location) +
                "| awk '{print $2}' " +
@@ -913,14 +909,38 @@ class InstallMigrationRPM(DeepSea):
         return retval
 
     def begin(self):
-        self._install_lynx_on_teuthology_server()
-        self.log.info(anchored("installing migration RPM {} from location {} on all nodes"
-                      .format(self.rpm_name, self.rpm_location)))
-        self.scripts.run(
-            self.ctx.cluster,
-            'install_migration_rpm.sh',
-            args=[self._migration_rpm_url(), self.rpm_name],
-            )
+        if not self.config:
+            self.log.warning("empty config: nothing to do")
+            return None
+        config_keys = len(self.config)
+        if config_keys == 2:
+            self.rpm_name = str(self.config.get("rpm", ''))
+            self.rpm_location = str(self.config.get("url", ''))
+            self._install_lynx_on_teuthology_server()
+            self.log.info(anchored("installing migration RPM {} from \
+                                   location {} on all nodes" .format\
+                                   (self.rpm_name, self.rpm_location)))
+            self.scripts.run(
+                self.ctx.cluster,
+                'install_migration_rpm.sh',
+                args=[self.rpm_name, self._migration_rpm_url()],)
+        elif config_keys == 1:
+            self.log.info(anchored("installing migration RPM {}".format(self.rpm_name)))
+            self.rpm_name = self.config.values()[0]
+            self.scripts.run(
+                self.ctx.cluster,
+                'install_migration_rpm.sh',
+                args=[self.rpm_name],
+                )
+        else:
+            raise ConfigError(
+                self.err_prefix +
+                "You provided wrong config. Keys should be:"
+                "- rpm: 'name_of_rpm'"
+                "or optionally if you get the rpm from remote repo add"
+                "- url: URL_of_repo_of_rpm"
+                )
+
 
     def end(self):
         pass
@@ -1680,6 +1700,7 @@ class Repository(DeepSea):
                 "You provided ->{}<- keys ({})".format(len(config_keys), config_keys)
                 )
         role_spec, repositories = self.config.items()[0]
+        self.log.info("Current role is {} and repositories are {}".format(role_spec, repositories))
         if role_spec == "all":
             remote = self.ctx.cluster
         else:
@@ -1811,10 +1832,19 @@ class Toolbox(DeepSea):
         """
         remote = get_remote_for_role(self.ctx, teuth_role)
         hostname = remote.hostname
-        self.log.info("Running {}-noout for OSDs on {}".format(add_or_rm, hostname))
-        cmd = ("sudo ceph osd tree -f json | "
-               "jq -c '[.nodes[] | select(.name == \"{}\")][0].children'"
-               .format(hostname.rstrip(".teuthology")))
+        """
+        Check if the host is teuthology-openstack or libcloud and trim it accordingly
+        """
+        if 'teuthology' in hostname:
+            self.log.info("Running {}-noout for OSDs on {}".format(add_or_rm, hostname))
+            cmd = ("sudo ceph osd tree -f json | "
+                   "jq -c '[.nodes[] | select(.name == \"{}\")][0].children'"
+                    .format(hostname.rstrip(".teuthology")))
+        else:
+            self.log.info("Running {}-noout for OSDs on {}".format(add_or_rm, hostname))
+            cmd = ("sudo ceph osd tree -f json | "
+                   "jq -c '[.nodes[] | select(.name == \"{}\")][0].children'"
+                    .format(hostname.rstrip(".ecp.suse.de")))
         osds = json.loads(remote.sh(cmd))
         self.log.info("Running {}-noout for OSDs ->{}<-".format(add_or_rm, osds))
         for osd in osds:
