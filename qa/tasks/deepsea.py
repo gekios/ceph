@@ -1743,6 +1743,20 @@ class Validation(DeepSea):
                     )
             idx += 1
 
+    def purge_osds_check(self):
+        if 'osds' in deepsea_ctx:
+            osds = self.master_remote.sh('sudo ceph osd tree | grep osd | wc -l')
+            if osds == deepsea_ctx['osds']:
+                self.log.debug("Status OK! The number of OSDs before and after" 
+                               "purge is the same")
+            else:
+                raise ValueError("Number of OSDs before cluster purge ({}) is not "
+                                 "the same with  the one after({}). `ceph.purge`" 
+                                 " seems to be broken".format(deepsea_ctx['osds'], osds))
+        else:
+            deepsea_ctx['osds'] = self.master_remote.sh('sudo ceph osd tree' 
+                                                        '| grep osd | wc -l')
+
     def begin(self):
         self.log.debug("Processing tests: ->{}<-".format(self.config.keys()))
         for method_spec, kwargs in self.config.items():
