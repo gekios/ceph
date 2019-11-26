@@ -8,21 +8,21 @@ tasks:
                         - 'ceph -s'
         - exec:
                 client.salt_master:
-                        - '! systemctl | grep -i ceph || true'
+                        - 'ceph fsid '
         - exec:
                 client.salt_master:
                         - 'salt-run disengage.safety'
         - exec:
                 client.salt_master:
                         - 'salt-run state.orch ceph.purge'
-        - exec:
-                client.salt_master:
-                        - "salt '*' cmd.run 'systemctl status | grep -i ceph'"
         - deepsea.orch:
                 stage: 2
         - deepsea.orch:
                 stage: 3
         - deepsea.orch:
                 stage: 4
+        - exec:
+                client.salt_master:
+                        - 'ceph fsid'
         - deepsea.validation:
                 purge_osds_check:
