@@ -1,0 +1,4 @@
+tasks:
+        - exec:
+                skuba_mgmt_host.0:
+                        - 'ls'
