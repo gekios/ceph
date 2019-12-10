@@ -1,0 +1,7 @@
+roles:
+  - [skuba_mgmt_host.0]
+  - [caasp_master.0]
+  - [caasp_worker.0]
+  - [caasp_worker.1]
+  - [caasp_worker.2]
+  - [caasp_worker.3]
