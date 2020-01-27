@@ -32,6 +32,7 @@ SLE_MIGRATION_YML="/etc/sle-migration-service.yml"
 cat <<EOM > $SLE_MIGRATION_YML
 use_zypper_migration: false
 soft_reboot: false
+debug: true
 EOM
 
 cat $SLE_MIGRATION_YML
