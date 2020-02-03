@@ -1,0 +1,11 @@
+tasks:
+        - ceph_salt:
+                repo: https://github.com/ceph/ceph-salt.git
+                branch: master
+        - cephadm:
+               conf:
+                 mgr:
+                   debug ms: 1
+                   debug mgr: 20
+
+
