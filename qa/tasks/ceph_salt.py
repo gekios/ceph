@@ -176,9 +176,9 @@ class CephSalt(Task):
                 if role in ceph_salt_roles:
                     self.master_remote.sh("sudo ceph-salt config /Cluster/Roles/{} add {}"
                                           .format(ceph_salt_roles[role],host))
-        if self.reboots_explicitly_forbidden:
-            self.master_remote.sh("sudo ceph-salt config /System_Update/Packages disable")
-            self.master_remote.sh("sudo ceph-salt config /System_Update/Reboot disable")
+        self.master_remote.sh("sudo ceph-salt config /Cluster/Roles/Admin add \*")
+        self.master_remote.sh("sudo ceph-salt config /System_Update/Packages disable")
+        self.master_remote.sh("sudo ceph-salt config /System_Update/Reboot disable")
         self.master_remote.sh("sudo ceph-salt config /SSH/ generate")
         self.master_remote.sh("sudo ceph-salt config /Containers/Images/ceph set"
                               #" docker.io/ceph/daemon-base:latest-master-devel")
@@ -204,8 +204,11 @@ class CephSalt(Task):
             for i in self.remote_lookup_table[node]:
                 if i.split(".")[0] == "osd":
                     osd_count+=1
-            value = '{\"testing_dg_%s\": {\"host_pattern\":\"%s*\", \"data_devices\": { \"limit\": %s }}}' % (node.split(".")[0], node.split(".")[0], osd_count)
-            self.master_remote.sh("sudo ceph-salt config /Storage/Drive_Groups add \'value={}\'".format(value))
+            value = ('{\"service_type\": \"osd\", \"placement\": {\"host_pattern\": \"' +
+                    node.split(".")[0] +'*\"}, \"service_id\": \"testing_dg_' + node.split(".")[0]
+                    + '\", \"data_devices\": { all : true }}')
+            self.master_remote.sh("sudo ceph-salt config /Storage/Drive_Groups"
+                                  " add value=\'{}\'".format(value))
 
     def __zypper_ps_with_possible_reboot(self):
         if self.sm.all_minions_zypper_ps_requires_reboot():
