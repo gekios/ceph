@@ -90,6 +90,8 @@ class CephSalt(Task):
         self.remote_lookup_table = self.ctx['remote_lookup_table']
         self.ceph_salt_deploy = ceph_salt_ctx['deploy']
         self.scripts = Scripts(self.ctx, self.log)
+        self.drive_group = ceph_salt_ctx['drive_group']
+        self.bootstrap_minion = None
 
     def _install_ceph_salt(self):
         '''
@@ -118,7 +120,6 @@ class CephSalt(Task):
         self.ctx.cluster.run(args='sudo systemctl restart salt-minion')
         self.master_remote.sh("sudo systemctl restart salt-master")
 
-            
     def _populate_ceph_salt_context(self):
         global ceph_salt_ctx
         ceph_salt_ctx['log_anchor'] = self.config.get('log_anchor', self.log_anchor_str)
@@ -137,6 +138,7 @@ class CephSalt(Task):
                 )
         ceph_salt_ctx['repo'] = self.config.get('repo', None)
         ceph_salt_ctx['branch'] = self.config.get('branch', None)
+        ceph_salt_ctx['drive_group'] = self.config.get('drive_group', 'default')
 
     def _add_CA_repo(self):
         '''
@@ -162,6 +164,34 @@ class CephSalt(Task):
         self.ctx.cluster.run(args= 'cat /etc/hosts' )
         self.ctx.cluster.run(args= 'sudo chattr +i /etc/hosts' )
 
+    def _roles_config_check(self):
+        '''
+        Currently cephadm doesn't support collocation of multiple roles in one node with the 
+        exception of OSDs
+        '''
+        for host, roles in self.remote_lookup_table.items():
+            seen_roles = []
+            for role in roles:
+                role = role.split('.')[0]
+                if role != 'osd' and role not in seen_roles:
+                    seen_roles.append(role)
+                elif role in seen_roles:
+                    raise ConfigError("Cephadm doesn't support collocation of same type"
+                                      " services apart from OSDs. Please check provided roles")
+
+    def _get_bootstrap_minion(self):
+        '''
+        Get the bootstrap node that's one with 'mon' and 'mgr' roles and will be used by ceph-salt
+        for bootstraping the cluster and then by cephadm to deploy the rest of the nodes
+        '''
+        for host, roles in self.remote_lookup_table.items():
+            if any("mon" and "mgr" in s for s in roles):
+                self.bootstrap_minion = self.remotes[host]
+                break
+        if not self.bootstrap_minion:
+            raise ConfigError("No possible bootstrap minion found. Please check the provided roles")
+        self.log.info("Bootstrap minion is: {}".format(self.bootstrap_minion.hostname))
+
     def _ceph_salt_config(self):
         '''
         This function populates ceph-salt config according to the configuration on the yaml files
@@ -170,13 +200,17 @@ class CephSalt(Task):
         '''
         ceph_salt_roles = {"mon": "Mon", "mgr": "Mgr"}
         for host, roles in self.remote_lookup_table.items():
-            self.master_remote.sh("sudo ceph-salt config /Cluster/Minions add {}".format(host))
+            self.master_remote.sh("sudo ceph-salt config /Ceph_Cluster/Minions add {}".format(host))
+            '''
             for role in roles:
                 role = role.split('.')[0]
                 if role in ceph_salt_roles:
                     self.master_remote.sh("sudo ceph-salt config /Cluster/Roles/{} add {}"
                                           .format(ceph_salt_roles[role],host))
-        self.master_remote.sh("sudo ceph-salt config /Cluster/Roles/Admin add \*")
+        '''
+        self.master_remote.sh("sudo ceph-salt config /Ceph_Cluster/Roles/Admin add \*")
+        self.master_remote.sh("sudo ceph-salt config /Ceph_Cluster/Roles/Bootstrap set {}"
+                              .format(self.bootstrap_minion.hostname))
         self.master_remote.sh("sudo ceph-salt config /System_Update/Packages disable")
         self.master_remote.sh("sudo ceph-salt config /System_Update/Reboot disable")
         self.master_remote.sh("sudo ceph-salt config /SSH/ generate")
@@ -184,31 +218,68 @@ class CephSalt(Task):
                               #" docker.io/ceph/daemon-base:latest-master-devel")
                               " registry.suse.de/devel/storage/7.0/cr/containers/ses/7/ceph/ceph")
         self.master_remote.sh("sudo ceph-salt config /Time_Server/Server_Hostname set {}"
-                              .format(self.master_remote.name))
+                              .format(self.master_remote.hostname))
         self.master_remote.sh("sudo ceph-salt config /Time_Server/External_Servers add"
                               " 0.pt.pool.ntp.org")
-        #FIXME Need to control if roles will be added better in the future to find a more holistic way
-        if self.ceph_salt_deploy:
-            self.master_remote.sh("sudo ceph-salt config /Deployment/Mon enable")
-            self.master_remote.sh("sudo ceph-salt config /Deployment/Mgr enable")
-            self.master_remote.sh("sudo ceph-salt config /Deployment/OSD enable")
-            self._populate_drives_group()
-            self.master_remote.sh("sudo ceph-salt config /Deployment/Dashboard/username set admin")
-            self.master_remote.sh("sudo ceph-salt config /Deployment/Dashboard/password set admin")
+        self.master_remote.sh("sudo ceph-salt config /Cephadm_Bootstrap/Dashboard/username set admin")
+        self.master_remote.sh("sudo ceph-salt config /Cephadm_Bootstrap/Dashboard/password set admin")
         self.master_remote.sh("sudo ceph-salt config ls")
-        self.master_remote.sh("sudo stdbuf -o0 ceph-salt -ldebug deploy --non-interactive")
+        if self.ceph_salt_deploy:
+            self.master_remote.sh("sudo stdbuf -o0 ceph-salt -ldebug deploy --non-interactive")
 
-    def _populate_drives_group(self):
+    def __deploy_non_osd_roles(self):
+        '''
+        SUpporting only MON and MGR for now
+        '''
+        #FIXME: Need to add other roles
+        cephadm_roles = [ "mon", "mgr" ]
+        cephadm_dict = dict((el,[]) for el in cephadm_roles)
+        for host, roles in self.remote_lookup_table.items():
+            for role in roles:
+                role = role.split('.')[0]
+                if (role in cephadm_roles and 
+                not (host == self.bootstrap_minion.hostname and role in ["mgr", "mon"])):
+                    cephadm_dict[role].append(host)
+        for k,v in cephadm_dict.items():
+            self.master_remote.sh("sudo ceph orch apply {role} {hosts}"
+                    .format(role = k, hosts = ','.join(i.split('.')[0] for i in cephadm_dict[k])))
+
+    def _deploy_osds(self):
+        self._generate_dg()
+        dg_path = "/home/ubuntu/drive_groups.yml"
+        self.master_remote.sh("sudo cat {}".format(dg_path))
+        self.master_remote.sh("sudo ceph orch apply osd -i {}".format(dg_path))
+
+
+    def __populate_dg(self):
+        self.drive_group = []
         for node in self.nodes_storage:
             osd_count = 0
             for i in self.remote_lookup_table[node]:
                 if i.split(".")[0] == "osd":
                     osd_count+=1
-            value = ('{\"service_type\": \"osd\", \"placement\": {\"host_pattern\": \"' +
-                    node.split(".")[0] +'*\"}, \"service_id\": \"testing_dg_' + node.split(".")[0]
-                    + '\", \"data_devices\": { all : true }}')
-            self.master_remote.sh("sudo ceph-salt config /Storage/Drive_Groups"
-                                  " add value=\'{}\'".format(value))
+            self.scripts.run(
+                self.master_remote, 'drive_groups.sh', args=[node.split(".")[0], osd_count])
+
+    def _generate_dg(self):
+        if isinstance(self.drive_group, str):
+            if self.drive_group == 'default':
+                self.__populate_dg()
+            else:
+                raise ConfigError("unknown drive group ->{}<-".format(self.drive_group))
+        elif isinstance(self.drive_group, dict):
+            pass
+        else:
+            raise ConfigError("unknown drive group ->{}<-".format(self.drive_group))
+        self.__roll_out_drive_group()
+
+    def __roll_out_drive_group(self, fpath="/home/ubuntu/drive_groups.yml"):
+        misc.sudo_write_file(
+            self.master_remote,
+            fpath,
+            yaml.dump(self.drive_group),
+            perms="0644",
+            )
 
     def __zypper_ps_with_possible_reboot(self):
         if self.sm.all_minions_zypper_ps_requires_reboot():
@@ -244,6 +315,8 @@ class CephSalt(Task):
     def begin(self):
         global ceph_salt_ctx
         super(CephSalt, self).begin()
+        self._roles_config_check()
+        self._get_bootstrap_minion()
         self._add_CA_repo()
         self._rm_localhost_from_etc_hosts()
         self._install_ceph_salt()
@@ -253,6 +326,8 @@ class CephSalt(Task):
         self.__zypper_ps_with_possible_reboot()
         self.sm.sync_pillar_data(quiet=self.quiet_salt)
         self._ceph_salt_config()
+        self.__deploy_non_osd_roles()
+        self._deploy_osds()
 
     def end(self):
         self.log.debug("beginning of end method")
