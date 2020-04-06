@@ -3,4 +3,15 @@ tasks:
                 repo: https://github.com/suse/ceph-salt.git
                 branch: master
                 drive_group: default
+        - cephadm:
+               conf:
+                 mgr:
+                   debug ms: 1
+                   debug mgr: 20
+overrides:
+  ceph:
+    conf:
+      osd:
+        osd shutdown pgref assert: true
+
 
