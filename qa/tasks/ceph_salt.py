@@ -90,7 +90,6 @@ class CephSalt(Task):
         self.remote_lookup_table = self.ctx['remote_lookup_table']
         self.ceph_salt_deploy = ceph_salt_ctx['deploy']
         self.scripts = Scripts(self.ctx, self.log)
-        self.drive_group = ceph_salt_ctx['drive_group']
         self.bootstrap_minion = None
 
     def _install_ceph_salt(self):
@@ -138,7 +137,6 @@ class CephSalt(Task):
                 )
         ceph_salt_ctx['repo'] = self.config.get('repo', None)
         ceph_salt_ctx['branch'] = self.config.get('branch', None)
-        ceph_salt_ctx['drive_group'] = self.config.get('drive_group', 'default')
 
     def _add_CA_repo(self):
         '''
@@ -245,13 +243,13 @@ class CephSalt(Task):
                     .format(role = k, hosts = ','.join(i.split('.')[0] for i in cephadm_dict[k])))
 
     def _deploy_osds(self):
-        self._generate_dg()
+        self.__generate_dg()
         dg_path = "/home/ubuntu/drive_groups.yml"
         self.master_remote.sh("sudo cat {}".format(dg_path))
         self.master_remote.sh("sudo ceph orch apply osd -i {}".format(dg_path))
 
 
-    def __populate_dg(self):
+    def __generate_dg(self):
         self.drive_group = []
         for node in self.nodes_storage:
             osd_count = 0
@@ -260,26 +258,6 @@ class CephSalt(Task):
                     osd_count+=1
             self.scripts.run(
                 self.master_remote, 'drive_groups.sh', args=[node.split(".")[0], osd_count])
-
-    def _generate_dg(self):
-        if isinstance(self.drive_group, str):
-            if self.drive_group == 'default':
-                self.__populate_dg()
-            else:
-                raise ConfigError("unknown drive group ->{}<-".format(self.drive_group))
-        elif isinstance(self.drive_group, dict):
-            pass
-        else:
-            raise ConfigError("unknown drive group ->{}<-".format(self.drive_group))
-        self.__roll_out_drive_group()
-
-    def __roll_out_drive_group(self, fpath="/home/ubuntu/drive_groups.yml"):
-        misc.sudo_write_file(
-            self.master_remote,
-            fpath,
-            yaml.dump(self.drive_group),
-            perms="0644",
-            )
 
     def __zypper_ps_with_possible_reboot(self):
         if self.sm.all_minions_zypper_ps_requires_reboot():
