@@ -8,6 +8,7 @@ import logging
 import time
 import yaml
 import argparse
+import uuid
 
 from salt_manager import SaltManager
 from scripts import Scripts
@@ -34,7 +35,7 @@ from teuthology.orchestra.daemon import DaemonGroup
 
 log = logging.getLogger(__name__)
 ceph_salt_ctx = {}
-reboot_tries = 30
+reboot_tries = 50
 
 def anchored(log_message):
     global ceph_salt_ctx
@@ -92,6 +93,17 @@ class CephSalt(Task):
         self.remote_lookup_table = self.ctx['remote_lookup_table']
         self.ceph_salt_deploy = ceph_salt_ctx['deploy']
         self.cluster = self.config.get('cluster', 'ceph')
+        self.testdir = misc.get_testdir(self.ctx)
+        if 'cephadm_mode' not in self.config:
+            self.config['cephadm_mode'] = 'root'
+        assert self.config['cephadm_mode'] in ['root', 'cephadm-package']
+        if self.config['cephadm_mode'] == 'root':
+            self.ctx.cephadm = self.testdir + '/cephadm'
+        else:
+            self.ctx.cephadm = 'cephadm'
+        self.ctx.daemons = DaemonGroup(use_cephadm = self.ctx.cephadm)
+        if not hasattr(self.ctx, 'ceph'):
+            self.ctx.ceph = {}
         self.ctx.ceph[self.cluster] = argparse.Namespace()
         self.scripts = Scripts(self.ctx, self.log)
         self.bootstrap_remote = None
@@ -172,39 +184,48 @@ class CephSalt(Task):
         for bootstraping the cluster and then by cephadm to deploy the rest of the nodes
         '''
         for host, roles in self.remote_lookup_table.items():
-            if any("mon" and "mgr" in s for s in roles):
+            # possibly use teuthology.is_type() here
+            if ("mon" in [r.split('.')[0] for r in roles] and
+                "mgr" in [r.split('.')[0] for r in roles]):
                 self.bootstrap_remote = self.remotes[host]
                 break
         if not self.bootstrap_remote:
             raise ConfigError("No possible bootstrap minion found. Please check the provided roles")
         self.log.info("Bootstrap minion is: {}".format(self.bootstrap_remote.hostname))
         cluster_name = self.cluster
+        fsid = str(uuid.uuid1())
+        self.log.info('Cluster fsid is %s' % fsid)
+        self.ctx.ceph[cluster_name].fsid = fsid
         fsid = self.ctx.ceph[cluster_name].fsid
         self.ctx.ceph[cluster_name].bootstrap_remote = self.bootstrap_remote
         for roles in self.remote_lookup_table[self.bootstrap_remote.hostname]:
-            if role.split('.')[0] == 'mon':
-                ctx.ceph[cluster_name].first_mon = first_mon
-            break
+            _, role, role_id = misc.split_role(roles)
+            if role == 'mon':
+                self.ctx.ceph[cluster_name].first_mon = role_id
+                break
         for roles in self.remote_lookup_table[self.bootstrap_remote.hostname]:
-            if role.split('.')[0] == 'mgr':
-                self.ctx.ceph[cluster_name].first_mgr = first_mgr
-            break
-        log.info('First mon is mon.%s on %s' % (first_mon,
+            _, role, role_id = misc.split_role(roles)
+            if role == 'mgr':
+                self.ctx.ceph[cluster_name].first_mgr = role_id
+                break
+        self.log.info('First mon is mon.%s on %s' % (self.ctx.ceph[cluster_name].first_mon,
+                                                self.bootstrap_remote.shortname))
+        self.log.info('First mgr is mgr.%s on %s' % (self.ctx.ceph[cluster_name].first_mgr,
                                                 self.bootstrap_remote.shortname))
         # register initial daemons
-        ctx.daemons.register_daemon(
-        bootstrap_remote, 'mon', first_mon,
+        self.ctx.daemons.register_daemon(
+        self.bootstrap_remote, 'mon', self.ctx.ceph[cluster_name].first_mon,
         cluster=cluster_name,
         fsid=fsid,
-        logger=log.getChild('mon.' + first_mon),
+        logger=log.getChild('mon.' + self.ctx.ceph[cluster_name].first_mon),
         wait=False,
         started=True,
         )
-        ctx.daemons.register_daemon(
-        bootstrap_remote, 'mgr', first_mgr,
+        self.ctx.daemons.register_daemon(
+        self.bootstrap_remote, 'mgr', self.ctx.ceph[cluster_name].first_mgr,
         cluster=cluster_name,
         fsid=fsid,
-        logger=log.getChild('mgr.' + first_mgr),
+        logger=log.getChild('mgr.' + self.ctx.ceph[cluster_name].first_mgr),
         wait=False,
         started=True,
         )
@@ -217,29 +238,28 @@ class CephSalt(Task):
         '''
         ceph_salt_roles = {"mon": "Mon", "mgr": "Mgr"}
         for host, roles in self.remote_lookup_table.items():
-            self.master_remote.sh("sudo ceph-salt config /Ceph_Cluster/Minions add {}".format(host))
-            '''
-            for role in roles:
-                role = role.split('.')[0]
-                if role in ceph_salt_roles:
-                    self.master_remote.sh("sudo ceph-salt config /Cluster/Roles/{} add {}"
-                                          .format(ceph_salt_roles[role],host))
-        '''
-        self.master_remote.sh("sudo ceph-salt config /Ceph_Cluster/Roles/Admin add \*")
-        self.master_remote.sh("sudo ceph-salt config /Ceph_Cluster/Roles/Bootstrap set {}"
+            self.master_remote.sh("sudo ceph-salt config /ceph_cluster/minions add {}".format(host))
+        self.master_remote.sh("sudo ceph-salt config /ceph_cluster/roles/admin add \*")
+        self.master_remote.sh("sudo ceph-salt config /ceph_cluster/roles/bootstrap set {}"
                               .format(self.bootstrap_remote.hostname))
-        self.master_remote.sh("sudo ceph-salt config /System_Update/Packages disable")
-        self.master_remote.sh("sudo ceph-salt config /System_Update/Reboot disable")
-        self.master_remote.sh("sudo ceph-salt config /SSH/ generate")
-        self.master_remote.sh("sudo ceph-salt config /Containers/Images/ceph set"
+        self.master_remote.sh("sudo ceph-salt config /system_update/packages disable")
+        self.master_remote.sh("sudo ceph-salt config /system_update/reboot disable")
+        self.master_remote.sh("sudo ceph-salt config /ssh/ generate")
+        self.master_remote.sh("sudo ceph-salt config /containers/images/ceph set"
                               #" docker.io/ceph/daemon-base:latest-master-devel")
                               " registry.suse.de/devel/storage/7.0/cr/containers/ses/7/ceph/ceph")
-        self.master_remote.sh("sudo ceph-salt config /Time_Server/Server_Hostname set {}"
+        self.master_remote.sh("sudo ceph-salt config /time_server/server_hostname set {}"
                               .format(self.master_remote.hostname))
-        self.master_remote.sh("sudo ceph-salt config /Time_Server/External_Servers add"
+        self.master_remote.sh("sudo ceph-salt config /time_server/external_servers add"
                               " 0.pt.pool.ntp.org")
-        self.master_remote.sh("sudo ceph-salt config /Cephadm_Bootstrap/Dashboard/username set admin")
-        self.master_remote.sh("sudo ceph-salt config /Cephadm_Bootstrap/Dashboard/password set admin")
+        self.master_remote.sh("sudo ceph-salt config /cephadm_bootstrap/advanced set mon-id {}"
+                              .format(self.ctx.ceph[self.cluster].first_mon))
+        self.master_remote.sh("sudo ceph-salt config /cephadm_bootstrap/advanced set mgr-id {}"
+                              .format(self.ctx.ceph[self.cluster].first_mgr))
+        self.master_remote.sh("sudo ceph-salt config /cephadm_bootstrap/advanced set fsid {}"
+                              .format(self.ctx.ceph[self.cluster].fsid))
+        self.master_remote.sh("sudo ceph-salt config /cephadm_bootstrap/dashboard/username set admin")
+        self.master_remote.sh("sudo ceph-salt config /cephadm_bootstrap/dashboard/password set admin")
         self.master_remote.sh("sudo ceph-salt config ls")
         if self.ceph_salt_deploy:
             self.master_remote.sh("sudo stdbuf -o0 ceph-salt -ldebug deploy --non-interactive")

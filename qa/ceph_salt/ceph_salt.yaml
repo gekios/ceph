@@ -1,17 +1,12 @@
 tasks:
         - ceph_salt:
-                repo: https://github.com/suse/ceph-salt.git
-                branch: master
+                repo: https://github.com/ricardoasmarques/ceph-salt.git
+                branch: configurable-daemon-id-and-fsid
                 drive_group: default
         - cephadm:
                conf:
                  mgr:
                    debug ms: 1
                    debug mgr: 20
-overrides:
-  ceph:
-    conf:
-      osd:
-        osd shutdown pgref assert: true
 
 
