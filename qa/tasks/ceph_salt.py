@@ -263,7 +263,7 @@ class CephSalt(Task):
         self.master_remote.sh("sudo ceph-salt config ls")
         if self.ceph_salt_deploy:
             self.master_remote.sh("sudo stdbuf -o0 ceph-salt -ldebug deploy --non-interactive")
-            self.ctx.ceph[cluster_name].bootstrapped = True
+            self.ctx.ceph[self.cluster].bootstrapped = True
 
     def __zypper_ps_with_possible_reboot(self):
         if self.sm.all_minions_zypper_ps_requires_reboot():
