@@ -32,6 +32,7 @@ from teuthology.orchestra import run
 from teuthology.task import Task
 from teuthology.contextutil import safe_while
 from teuthology.orchestra.daemon import DaemonGroup
+from tasks.ceph import get_mons
 
 log = logging.getLogger(__name__)
 ceph_salt_ctx = {}
@@ -94,17 +95,14 @@ class CephSalt(Task):
         self.ceph_salt_deploy = ceph_salt_ctx['deploy']
         self.cluster = self.config.get('cluster', 'ceph')
         self.testdir = misc.get_testdir(self.ctx)
-        if 'cephadm_mode' not in self.config:
-            self.config['cephadm_mode'] = 'root'
-        assert self.config['cephadm_mode'] in ['root', 'cephadm-package']
-        if self.config['cephadm_mode'] == 'root':
-            self.ctx.cephadm = self.testdir + '/cephadm'
-        else:
-            self.ctx.cephadm = 'cephadm'
+        self.config['cephadm_mode'] = 'cephadm-package'
+        self.ctx.cephadm = 'cephadm'
         self.ctx.daemons = DaemonGroup(use_cephadm = self.ctx.cephadm)
         if not hasattr(self.ctx, 'ceph'):
             self.ctx.ceph = {}
+            self.ctx.managers = {}
         self.ctx.ceph[self.cluster] = argparse.Namespace()
+        self.ctx.ceph[self.cluster].thrashers = []
         self.scripts = Scripts(self.ctx, self.log)
         self.bootstrap_remote = None
 
@@ -230,6 +228,18 @@ class CephSalt(Task):
         started=True,
         )
 
+        remotes_and_roles = self.ctx.cluster.remotes.items()
+        roles = [role_list for (remote, role_list) in remotes_and_roles]
+        ips = [host for (host, port) in
+              (remote.ssh.get_transport().getpeername() 
+              for (remote, role_list) in remotes_and_roles)]
+        self.ctx.ceph[cluster_name].mons = get_mons(
+            roles, ips, self.cluster,
+            mon_bind_msgr2 = self.config.get('mon_bind_msgr2', True),
+            mon_bind_addrvec = self.config.get('mon_bind_addrvec', True),
+            )
+        log.info('Monitor IPs: %s' % self.ctx.ceph[cluster_name].mons)
+
     def _ceph_salt_bootstrap(self):
         '''
         This function populates ceph-salt config according to the configuration on the yaml files
@@ -237,6 +247,8 @@ class CephSalt(Task):
         the cluster deployment
         '''
         ceph_salt_roles = {"mon": "Mon", "mgr": "Mgr"}
+        container_image = "registry.suse.de/devel/storage/7.0/cr/containers/ses/7/ceph/ceph"
+        #container_image = " docker.io/ceph/daemon-base:latest-master-devel"
         for host, roles in self.remote_lookup_table.items():
             self.master_remote.sh("sudo ceph-salt config /ceph_cluster/minions add {}".format(host))
         self.master_remote.sh("sudo ceph-salt config /ceph_cluster/roles/admin add \*")
@@ -246,10 +258,11 @@ class CephSalt(Task):
         self.master_remote.sh("sudo ceph-salt config /system_update/reboot disable")
         self.master_remote.sh("sudo ceph-salt config /ssh/ generate")
         self.master_remote.sh("sudo ceph-salt config /containers/images/ceph set"
-                              #" docker.io/ceph/daemon-base:latest-master-devel")
-                              " registry.suse.de/devel/storage/7.0/cr/containers/ses/7/ceph/ceph")
+                              " {}".format(container_image))
+        self.ctx.ceph[self.cluster].image = container_image
         self.master_remote.sh("sudo ceph-salt config /time_server/server_hostname set {}"
                               .format(self.master_remote.hostname))
+        self.ctx.ceph[self.cluster].image = "registry.suse.de/devel/storage/7.0/cr/containers/ses/7/ceph/ceph"
         self.master_remote.sh("sudo ceph-salt config /time_server/external_servers add"
                               " 0.pt.pool.ntp.org")
         self.master_remote.sh("sudo ceph-salt config /cephadm_bootstrap/advanced set mon-id {}"
