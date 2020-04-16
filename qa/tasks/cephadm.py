@@ -961,71 +961,72 @@ def task(ctx, config):
     first_ceph_cluster = False
     if not hasattr(ctx, 'daemons'):
         first_ceph_cluster = True
-    if not hasattr(ctx, 'ceph'):
-        ctx.ceph = {}
-        ctx.managers = {}
     if 'cluster' not in config:
         config['cluster'] = 'ceph'
     cluster_name = config['cluster']
-    ctx.ceph[cluster_name] = argparse.Namespace()
-
-    ctx.ceph[cluster_name].thrashers = []
-    # fixme: setup watchdog, ala ceph.py
-
-    # cephadm mode?
-    if 'cephadm_mode' not in config:
-        config['cephadm_mode'] = 'root'
-    assert config['cephadm_mode'] in ['root', 'cephadm-package']
-    if config['cephadm_mode'] == 'root':
-        ctx.cephadm = testdir + '/cephadm'
-    else:
-        ctx.cephadm = 'cephadm'  # in the path
-
     if first_ceph_cluster:
-        # FIXME: this is global for all clusters
-        ctx.daemons = DaemonGroup(
-            use_cephadm=ctx.cephadm)
+        if not hasattr(ctx, 'ceph'):
+            ctx.ceph = {}
+            ctx.managers = {}
+        ctx.ceph[cluster_name] = argparse.Namespace()
 
-    # image
-    ctx.ceph[cluster_name].image = config.get('image')
-    ref = None
-    if not ctx.ceph[cluster_name].image:
-        sha1 = config.get('sha1')
-        if sha1:
-            ctx.ceph[cluster_name].image = 'quay.io/ceph-ci/ceph:%s' % sha1
-            ref = sha1
+        ctx.ceph[cluster_name].thrashers = []
+        # fixme: setup watchdog, ala ceph.py
+
+        # cephadm mode?
+        if 'cephadm_mode' not in config:
+            config['cephadm_mode'] = 'root'
+        assert config['cephadm_mode'] in ['root', 'cephadm-package']
+        if config['cephadm_mode'] == 'root':
+            ctx.cephadm = testdir + '/cephadm'
         else:
-            # hmm, fall back to branch?
-            branch = config.get('branch', 'master')
-            ref = branch
-            ctx.ceph[cluster_name].image = 'quay.io/ceph-ci/ceph:%s' % branch
-    log.info('Cluster image is %s' % ctx.ceph[cluster_name].image)
+            ctx.cephadm = 'cephadm'  # in the path
 
-    # uuid
-    fsid = str(uuid.uuid1())
-    log.info('Cluster fsid is %s' % fsid)
-    ctx.ceph[cluster_name].fsid = fsid
+        if first_ceph_cluster:
+            # FIXME: this is global for all clusters
+            ctx.daemons = DaemonGroup(
+                use_cephadm=ctx.cephadm)
 
-    # mon ips
-    log.info('Choosing monitor IPs and ports...')
-    remotes_and_roles = ctx.cluster.remotes.items()
-    roles = [role_list for (remote, role_list) in remotes_and_roles]
-    ips = [host for (host, port) in
-           (remote.ssh.get_transport().getpeername() for (remote, role_list) in remotes_and_roles)]
-    ctx.ceph[cluster_name].mons = get_mons(
-        roles, ips, cluster_name,
-        mon_bind_msgr2=config.get('mon_bind_msgr2', True),
-        mon_bind_addrvec=config.get('mon_bind_addrvec', True),
-        )
-    log.info('Monitor IPs: %s' % ctx.ceph[cluster_name].mons)
+        # image
+        ctx.ceph[cluster_name].image = config.get('image')
+        ref = None
+        if not ctx.ceph[cluster_name].image:
+            sha1 = config.get('sha1')
+            if sha1:
+                ctx.ceph[cluster_name].image = 'quay.io/ceph-ci/ceph:%s' % sha1
+                ref = sha1
+            else:
+                # hmm, fall back to branch?
+                branch = config.get('branch', 'master')
+                ref = branch
+                ctx.ceph[cluster_name].image = 'quay.io/ceph-ci/ceph:%s' % branch
+        log.info('Cluster image is %s' % ctx.ceph[cluster_name].image)
 
-    with contextutil.nested(
+        # uuid
+        fsid = str(uuid.uuid1())
+        log.info('Cluster fsid is %s' % fsid)
+        ctx.ceph[cluster_name].fsid = fsid
+
+        # mon ips
+        log.info('Choosing monitor IPs and ports...')
+        remotes_and_roles = ctx.cluster.remotes.items()
+        roles = [role_list for (remote, role_list) in remotes_and_roles]
+        ips = [host for (host, port) in
+               (remote.ssh.get_transport().getpeername() for (remote, role_list) in remotes_and_roles)]
+        ctx.ceph[cluster_name].mons = get_mons(
+            roles, ips, cluster_name,
+            mon_bind_msgr2=config.get('mon_bind_msgr2', True),
+            mon_bind_addrvec=config.get('mon_bind_addrvec', True),
+            )
+        log.info('Monitor IPs: %s' % ctx.ceph[cluster_name].mons)
+
+    with contextutil.nested( _ for _ in [
             lambda: ceph_initial(),
             lambda: normalize_hostnames(ctx=ctx),
-            lambda: download_cephadm(ctx=ctx, config=config, ref=ref),
+            lambda: download_cephadm(ctx=ctx, config=config, ref=ref) if (first_ceph_cluster) else None,
             lambda: ceph_log(ctx=ctx, config=config),
             lambda: ceph_crash(ctx=ctx, config=config),
-            lambda: ceph_bootstrap(ctx=ctx, config=config),
+            lambda: ceph_bootstrap(ctx=ctx, config=config) if (first_ceph_cluster) else None,
             lambda: crush_setup(ctx=ctx, config=config),
             lambda: ceph_mons(ctx=ctx, config=config),
             lambda: ceph_mgrs(ctx=ctx, config=config),
@@ -1037,6 +1038,7 @@ def task(ctx, config):
             lambda: ceph_monitoring('alertmanager', ctx=ctx, config=config),
             lambda: ceph_monitoring('grafana', ctx=ctx, config=config),
             lambda: ceph_clients(ctx=ctx, config=config),
+    ] if _
     ):
         ctx.managers[cluster_name] = CephManager(
             ctx.ceph[cluster_name].bootstrap_remote,
