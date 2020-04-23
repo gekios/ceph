@@ -611,7 +611,7 @@ def ceph_osds(ctx, config):
                 'ceph-volume', 'lvm', 'zap', dev])
             _shell(ctx, cluster_name, remote, [
                 'ceph', 'orch', 'daemon', 'add', 'osd',
-                remote.shortname + ':' + short_dev
+                remote.shortname + ':' + dev
             ])
             ctx.daemons.register_daemon(
                 remote, 'osd', id_,
@@ -944,6 +944,11 @@ def crush_setup(ctx, config):
     yield
 
 @contextlib.contextmanager
+def dummy(ctx, config):
+    log.info('Entered dummy function')
+    yield
+
+@contextlib.contextmanager
 def task(ctx, config):
     if config is None:
         config = {}
@@ -1020,13 +1025,13 @@ def task(ctx, config):
             )
         log.info('Monitor IPs: %s' % ctx.ceph[cluster_name].mons)
 
-    with contextutil.nested( _ for _ in [
+    with contextutil.nested( 
             lambda: ceph_initial(),
             lambda: normalize_hostnames(ctx=ctx),
-            lambda: download_cephadm(ctx=ctx, config=config, ref=ref) if (first_ceph_cluster) else None,
+            lambda: download_cephadm(ctx=ctx, config=config, ref=ref) if (first_ceph_cluster) else dummy(ctx=ctx, config=config),
             lambda: ceph_log(ctx=ctx, config=config),
             lambda: ceph_crash(ctx=ctx, config=config),
-            lambda: ceph_bootstrap(ctx=ctx, config=config) if (first_ceph_cluster) else None,
+            lambda: ceph_bootstrap(ctx=ctx, config=config) if (first_ceph_cluster) else dummy(ctx=ctx, config=config),
             lambda: crush_setup(ctx=ctx, config=config),
             lambda: ceph_mons(ctx=ctx, config=config),
             lambda: ceph_mgrs(ctx=ctx, config=config),
@@ -1038,7 +1043,6 @@ def task(ctx, config):
             lambda: ceph_monitoring('alertmanager', ctx=ctx, config=config),
             lambda: ceph_monitoring('grafana', ctx=ctx, config=config),
             lambda: ceph_clients(ctx=ctx, config=config),
-    ] if _
     ):
         ctx.managers[cluster_name] = CephManager(
             ctx.ceph[cluster_name].bootstrap_remote,

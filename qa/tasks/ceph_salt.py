@@ -210,23 +210,6 @@ class CephSalt(Task):
                                                 self.bootstrap_remote.shortname))
         self.log.info('First mgr is mgr.%s on %s' % (self.ctx.ceph[cluster_name].first_mgr,
                                                 self.bootstrap_remote.shortname))
-        # register initial daemons
-        self.ctx.daemons.register_daemon(
-        self.bootstrap_remote, 'mon', self.ctx.ceph[cluster_name].first_mon,
-        cluster=cluster_name,
-        fsid=fsid,
-        logger=log.getChild('mon.' + self.ctx.ceph[cluster_name].first_mon),
-        wait=False,
-        started=True,
-        )
-        self.ctx.daemons.register_daemon(
-        self.bootstrap_remote, 'mgr', self.ctx.ceph[cluster_name].first_mgr,
-        cluster=cluster_name,
-        fsid=fsid,
-        logger=log.getChild('mgr.' + self.ctx.ceph[cluster_name].first_mgr),
-        wait=False,
-        started=True,
-        )
 
         remotes_and_roles = self.ctx.cluster.remotes.items()
         roles = [role_list for (remote, role_list) in remotes_and_roles]
@@ -277,6 +260,24 @@ class CephSalt(Task):
         if self.ceph_salt_deploy:
             self.master_remote.sh("sudo stdbuf -o0 ceph-salt -ldebug deploy --non-interactive")
             self.ctx.ceph[self.cluster].bootstrapped = True
+        # register initial daemons
+        self.ctx.daemons.register_daemon(
+        self.bootstrap_remote, 'mon', self.ctx.ceph[self.cluster].first_mon,
+        cluster=self.cluster,
+        fsid=self.ctx.ceph[self.cluster].fsid,
+        logger=log.getChild('mon.' + self.ctx.ceph[self.cluster].first_mon),
+        wait=False,
+        started=True,
+        )
+        self.ctx.daemons.register_daemon(
+        self.bootstrap_remote, 'mgr', self.ctx.ceph[self.cluster].first_mgr,
+        cluster=self.cluster,
+        fsid=self.ctx.ceph[self.cluster].fsid,
+        logger=log.getChild('mgr.' + self.ctx.ceph[self.cluster].first_mgr),
+        wait=False,
+        started=True,
+        )
+        self.master_remote.sh("sleep 60")
 
     def __zypper_ps_with_possible_reboot(self):
         if self.sm.all_minions_zypper_ps_requires_reboot():
