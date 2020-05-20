@@ -11,5 +11,6 @@ tasks:
         - deepsea.ceph_conf:
                 global:
                         bluestore warn on legacy statfs: false
+                        mon_warn_on_pool_pg_num_not_power_of_two: false
         - deepsea.orch:
                 stage: 3
