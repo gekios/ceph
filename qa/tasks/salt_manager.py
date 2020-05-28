@@ -25,7 +25,7 @@ from teuthology.orchestra import run
 from util import get_remote_for_role
 
 log = logging.getLogger(__name__)
-master_role = 'client.salt_master'
+master_role = 'salt.master'
 
 
 class InternalError(Exception):
