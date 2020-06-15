@@ -518,7 +518,7 @@ class TestCephadm(object):
                 namespace='namespace'
             ), CephadmOrchestrator.apply_nfs),
             (IscsiServiceSpec(
-                service_id='name',
+                service_id='iscsi',
                 pool='pool',
                 api_user='user',
                 api_password='password'
