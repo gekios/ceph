@@ -793,7 +793,7 @@ def ceph_iscsi(ctx, config):
     for role, i in daemons.items():
         remote, id_ = i
         ctx.daemons.register_daemon(
-            remote, 'sicsi', id_,
+            remote, 'iscsi', id_,
             cluster=cluster_name,
             fsid=fsid,
             logger=log.getChild(role),
