@@ -10,7 +10,7 @@ function health_ok() {
 }
 
 storage_device_name=$(salt $disk_storage_minion cmd.run \
- "pvdisplay | grep -B 1 'VG Name .* ceph' | egrep -v 'ceph-block-dbs|nvme|--' | head -1 | cut -d / -f 3" --output=json | jq -r .[])
+ "pvdisplay 2>/dev/null | grep -B 1 'VG Name .* ceph' | egrep -v 'ceph-block-dbs|nvme|--' | head -1 | cut -d / -f 3" --output=json | jq -r .[])
 salt $disk_storage_minion cmd.run "mkdir /debug; mount debugfs /debug -t debugfs; cd /debug/fail_make_request;\
     echo 10 > interval; echo 100 > probability; echo -1 > times; echo 1 > /sys/block/$storage_device_name/make-it-fail"
 
