@@ -1,2 +1,19 @@
 roles:
-  - [client.salt_master, osd.0, osd.1, osd.2, osd.3, mon.a, mgr.x]
+  - - client.salt_master
+    - osd.0
+    - osd.1
+    - osd.2
+    - osd.3
+    - mon.a
+    - mgr.x
+  - - mon.b
+    - mgr.x
+    - osd.4
+    - osd.5
+    - osd.6
+    - osd.7
+    - prometheus.a
+    - client.0
+    - grafana.a
+    - node-exporter.b
+    - ceph.iscsi.iscsi.a
