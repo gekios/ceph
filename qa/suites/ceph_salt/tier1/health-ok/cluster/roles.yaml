@@ -16,4 +16,4 @@ roles:
     - client.0
     - grafana.a
     - node-exporter.b
-    - ceph.iscsi.iscsi.a
+    - igw.a
