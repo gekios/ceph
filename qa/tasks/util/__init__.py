@@ -150,10 +150,12 @@ def introspect_roles(ctx, logger, quiet=True):
             # FIXME: support multiple clusters as used in, e.g.,
             # rgw/multisite suite
             role_arr = role.split('.')
-            if len(role_arr) != 2:
-                raise ConfigError("Unsupported role ->{}<-"
-                                  .format(role))
-            (role_type, _) = role_arr
+            #if len(role_arr) != 2:
+                #raise ConfigError("Unsupported role ->{}<-"
+                                  #.format(role))
+            if role_arr[0] == 'ceph':
+                role_arr.pop(0)
+            (role_type, *role_rest) = role_arr
             if role_type not in role_lookup_table:
                 role_lookup_table[role_type] = {}
             role_lookup_table[role_type][role] = remote.hostname
