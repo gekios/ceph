@@ -1,4 +1,5 @@
 tasks:
+- ceph_salt:
 - cephadm:
     conf:
       mgr:
