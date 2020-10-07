@@ -1,7 +1,6 @@
 roles:
 - - client.salt_master
   - mon.a
-  - mon.c
   - mgr.y
   - osd.0
   - osd.1
