@@ -1,5 +1,6 @@
 tasks:
 - cephadm:
+    use_spec_file: True
     conf:
       mgr:
         debug ms: 1
