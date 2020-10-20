@@ -18,6 +18,7 @@ from io import BytesIO
 from six import StringIO
 from tarfile import ReadError
 from tasks.ceph_manager import CephManager
+from tasks.util import get_remote_for_role
 from teuthology import misc as teuthology
 from teuthology import contextutil
 from teuthology.orchestra import run
@@ -1155,6 +1156,249 @@ def initialize_config(ctx, config):
     yield
 
 @contextlib.contextmanager
+def ceph_deploy_from_spec(ctx, config):
+    cluster_name = config['cluster']
+    fsid = ctx.ceph[cluster_name].fsid
+    daemons = {}
+
+    #mon_or_mgr_spec(ctx, config, 'mon', daemons)
+    #mon_or_mgr_spec(ctx, config, 'mgr', daemons)
+    #osd_spec(ctx, config, daemons)
+    #mds_spec(ctx, config, daemons)
+    #spec_yaml(ctx, config, daemons)
+    #mds_spec(ctx, config, daemons)
+    #spec_yaml(ctx, config, daemons)
+    #spec_yaml(ctx, config, 'prometheus', daemons)
+    #spec_yaml(ctx, config, 'node-exporter', daemons)
+    #spec_yaml(ctx, config, 'alertmanager', daemons)
+    #spec_yaml(ctx, config, 'grafana', daemons)
+    #clients_spec(ctx, config, daemons)
+
+    #register all daemons
+    for rolename, role_ids in daemons.items():
+        for role in role_ids:
+            c_, _, id_ = teuthology.split_role(role)
+            remote =  get_remote_for_role(ctx, role)
+            ctx.daemons.register_daemon(
+                remote, rolename, id_,
+                cluster=cluster_name,
+                fsid=fsid,
+                logger=log.getChild(rolename),
+                wait=False,
+                started=True,
+            )
+
+    # refresh our (final) ceph.conf file
+    log.info('Generating final ceph.conf file...')
+    r = _shell(
+        ctx=ctx,
+        cluster_name=cluster_name,
+        remote=ctx.ceph[cluster_name].bootstrap_remote,
+        args=[
+            'ceph', 'config', 'generate-minimal-conf',
+        ],
+        stdout=StringIO(),
+    )
+    ctx.ceph[cluster_name].config_file = r.stdout.getvalue()
+
+@contextlib.contextmanager
+def mon_or_mgr_rolespec(daemon_type, ctx, config):
+    spec_yaml = []
+    spec_filepath = '/home/ubuntu/{}.yaml'.format(daemon_type)
+    testdir = teuthology.get_testdir(ctx)
+    cluster_name = config['cluster']
+    num_mons = 0
+    temp_spec = {'service_type': daemon_type, 'service_name': daemon_type, 'placement': {'hosts': []}}
+    for remote, roles in ctx.cluster.remotes.items():
+        for role in [r for r in roles
+                    if teuthology.is_type(daemon_type)(r)]:
+            c_, _, id_ = teuthology.split_role(role)
+            new_node_spec = {'hostname': remote.shortname, 'name': id_}
+            temp_spec['placement']['hosts'].append(new_node_spec)
+            #daemons[daemon_type].append(role)
+            if daemon_type == 'mon':
+                num_mons += 1
+    spec_yaml.append(temp_spec)
+
+    #Create service spec file
+    teuthology.write_file(
+        remote=ctx.ceph[cluster_name].bootstrap_remote,
+        path=spec_filepath,
+        data=yaml.safe_dump_all(spec_yaml),
+    )
+
+    cmd = 'sudo cat ' + spec_filepath
+    ctx.ceph[cluster_name].bootstrap_remote.run(args=cmd)
+    #Deploy daemons from spec file
+    _shell(ctx, cluster_name, ctx.ceph[cluster_name].bootstrap_remote,
+           ['ceph', 'orch', 'apply', '-i', spec_filepath])
+
+    #Wait for all mons to come up
+    if daemon_type == 'mon':
+        with contextutil.safe_while(sleep=1, tries=180) as proceed:
+            while proceed():
+                log.info('Waiting for %d mons in monmap...' % (num_mons))
+                r = _shell(
+                    ctx=ctx,
+                    cluster_name=cluster_name,
+                    remote=ctx.ceph[cluster_name].bootstrap_remote,
+                    args=[
+                        'ceph', 'mon', 'dump', '-f', 'json',
+                    ],
+                    stdout=StringIO(),
+                )
+                j = json.loads(r.stdout.getvalue())
+                if len(j['mons']) == num_mons:
+                    break
+
+@contextlib.contextmanager
+def osd_rolespec(ctx, config):
+    spec_yaml = []
+    spec_filepath = '/home/ubuntu/{osd.yaml'
+    cluster_name = config['cluster']
+    testdir = teuthology.get_testdir(ctx)
+    for remote, roles in ctx.cluster.remotes.items():
+        temp_spec = {'service_type': 'osd'}
+        num_osds = 0
+        temp_spec['service_id'] = 'spec_yaml' + remote.shortname
+        temp_spec['placement'] = {'host_pattern': remote.shortname}
+        for osd in [r for r in roles
+                    if teuthology.is_type('osd', cluster_name)(r)]:
+            num_osds += 1
+        temp_spec['data_devices'] = {'limit': num_osds}
+        spec_yaml.append(temp_spec)
+
+    #Create service spec file
+    teuthology.write_file(
+        remote=ctx.ceph[cluster_name].bootstrap_remote,
+        path=spec_filepath,
+        data=yaml.safe_dump_all(spec_yaml),
+    )
+    cmd = 'sudo cat ' + spec_filepath
+    ctx.ceph[cluster_name].bootstrap_remote.run(args=cmd)
+
+    #Deploy daemons from spec file
+    _shell(ctx, cluster_name, ctx.ceph[cluster_name].bootstrap_remote,
+           ['ceph', 'orch', 'apply', '-i', spec_filepath])
+    # ISSUE: HOW TO FIGURE OUT THE DAEMON ID TO REGISTER IT
+
+@contextlib.contextmanager
+def rgw_rolespec(ctx, config):
+    spec_yaml = []
+    spec_filepath = '/home/ubuntu/rgw.yaml'
+    nodes = {}
+    cluster_name = config['cluster']
+    testdir = teuthology.get_testdir(ctx)
+    for remote, roles in ctx.cluster.remotes.items():
+        for role in [r for r in roles
+                    if teuthology.is_type('rgw', cluster_name)(r)]:
+            c_, _, id_ = teuthology.split_role(role)
+            realmzone = '.'.join(id_.split('.')[0:2])
+            if realmzone not in nodes:
+                nodes[realmzone] = []
+            nodes[realmzone].append(remote.shortname)
+
+    for realmzone, nodelist in nodes.items():
+        (realm, zone) = realmzone.split('.', 1)
+        temp_spec = {'service_type': 'rgw', 'service_id': realmzone, 'spec': {'rgw_realm': realm, 'rgw_zone': zone}, 'placement': {'hosts': []}}
+        for node in nodelist:
+            temp_spec['placement']['hosts'].append(node)
+        spec_yaml.append(temp_spec)
+    
+    if nodes:
+        #Create service spec file
+        teuthology.write_file(
+            remote=ctx.ceph[cluster_name].bootstrap_remote,
+            path=spec_filepath,
+            data=yaml.safe_dump_all(spec_yaml),
+        )
+        cmd = 'sudo cat ' + spec_filepath
+        ctx.ceph[cluster_name].bootstrap_remote.run(args=cmd)
+
+        #Deploy daemons from spec file
+        _shell(ctx, cluster_name, ctx.ceph[cluster_name].bootstrap_remote,
+               ['ceph', 'orch', 'apply', '-i', spec_filepath])
+        # ISSUE: HOW TO FIGURE OUT THE DAEMON ID TO REGISTER IT
+
+@contextlib.contextmanager
+def monitoring_rolespec(daemon_type, ctx, config):
+    spec_yaml = {'service_type': daemon_type, 'placement': {'hosts': []}}
+    spec_filepath = '/home/ubuntu/' + daemon_type + '.yaml'
+    nodes = []
+    cluster_name = config['cluster']
+    testdir = teuthology.get_testdir(ctx)
+    for remote, roles in ctx.cluster.remotes.items():
+        for role in [r for r in roles
+                    if teuthology.is_type(daemon_type, cluster_name)(r)]:
+            spec_yaml['placement']['hosts'].append(remote.shortname)
+            nodes.append(remote.shortname + '=' + role)
+
+    #Create service spec file
+    teuthology.write_file(
+        remote=ctx.ceph[cluster_name].bootstrap_remote,
+        path=spec_filepath,
+        data=yaml.safe_dump_all(spec_yaml),
+    )
+
+    cmd = 'sudo cat ' + spec_filepath
+    ctx.ceph[cluster_name].bootstrap_remote.run(args=cmd)
+
+    #Deploy daemons from spec file
+    _shell(ctx, cluster_name, ctx.ceph[cluster_name].bootstrap_remote,
+           ['ceph', 'orch', 'apply', '-i', spec_filepath])
+    # ISSUE: HOW TO FIGURE OUT THE DAEMON ID TO REGISTER IT
+
+@contextlib.contextmanager
+def igw_rolespec(ctx, config):
+    nodes = []
+    cluster_name = config['cluster']
+    poolname = 'iscsi'
+    spec_yaml = {'service_type': 'iscsi', 'service_id': 'igw', 'placement': {'hosts': []}}
+    spec_filepath = '/home/ubuntu/igw.yaml'
+    testdir = teuthology.get_testdir(ctx)
+    log.info('Populating igw spec file')
+    for remote, roles in ctx.cluster.remotes.items():
+        for role in [r for r in roles
+                    if teuthology.is_type('iscsi', cluster_name)(r)]:
+            c_, _, id_ = teuthology.split_role(role)
+            log.info('Adding %s on %s' % (role, remote.shortname))
+            spec_yaml['placement']['hosts'].append(remote.shortname)
+            nodes.append(remote.shortname + '=' + id_)
+    if nodes:
+        # ceph osd pool create iscsi 3 3 replicated
+        _shell(ctx, cluster_name, remote, [
+            'ceph', 'osd', 'pool', 'create',
+            poolname, '3', '3', 'replicated']
+        )
+
+        _shell(ctx, cluster_name, remote, [
+            'ceph', 'osd', 'pool', 'application', 'enable',
+            poolname, 'rbd']
+        )
+
+        # ceph orch apply iscsi iscsi user password
+        _shell(ctx, cluster_name, remote, [
+            'ceph', 'orch', 'apply', 'iscsi',
+            poolname, 'user', 'password',
+            '--placement', str(len(nodes)) + ';' + ';'.join(nodes)]
+        )
+
+    #Create service spec file
+    teuthology.write_file(
+        remote=ctx.ceph[cluster_name].bootstrap_remote,
+        path=spec_filepath,
+        data=yaml.safe_dump_all(spec_yaml),
+    )
+
+    cmd = 'sudo cat ' + spec_filepath
+    ctx.ceph[cluster_name].bootstrap_remote.run(args=cmd)
+
+    #Deploy daemons from spec file
+    _shell(ctx, cluster_name, ctx.ceph[cluster_name].bootstrap_remote,
+           ['ceph', 'orch', 'apply', '-i', spec_filepath])
+    # ISSUE: HOW TO FIGURE OUT THE DAEMON ID TO REGISTER IT
+
+@contextlib.contextmanager
 def task(ctx, config):
     """
     Deploy ceph cluster using cephadm
@@ -1221,7 +1465,7 @@ def task(ctx, config):
     container_image_name = containers.get('image', container_image_name)
     container_registry_mirror = mirrors.get('docker.io',
                                             container_registry_mirror)
-
+    use_spec_file = config.get('use_spec_file', False)
 
     if not hasattr(ctx.ceph[cluster_name], 'image'):
         ctx.ceph[cluster_name].image = config.get('image')
@@ -1264,17 +1508,25 @@ def task(ctx, config):
                               else ceph_bootstrap(ctx, config,
                                                   container_registry_mirror),
             lambda: crush_setup(ctx=ctx, config=config),
-            lambda: ceph_mons(ctx=ctx, config=config),
+            lambda: mon_or_mgr_rolespec('mon', ctx=ctx, config=config) if use_spec_file\
+            else  ceph_mons(ctx=ctx, config=config),
             lambda: distribute_config_and_admin_keyring(ctx=ctx, config=config),
-            lambda: ceph_mgrs(ctx=ctx, config=config),
-            lambda: ceph_osds(ctx=ctx, config=config),
+            lambda: mon_or_mgr_rolespec('mgr', ctx=ctx, config=config) if use_spec_file\
+            else ceph_mgrs(ctx=ctx, config=config),
+            lambda: osd_rolespec(ctx=ctx, config=config) if use_spec_file\
+            else ceph_osds(ctx=ctx, config=config),
             lambda: ceph_mdss(ctx=ctx, config=config),
-            lambda: ceph_rgw(ctx=ctx, config=config),
+            lambda: rgw_rolespec(ctx=ctx, config=config) if use_spec_file\
+            else ceph_rgw(ctx=ctx, config=config),
             lambda: ceph_iscsi(ctx=ctx, config=config),
-            lambda: ceph_monitoring('prometheus', ctx=ctx, config=config),
-            lambda: ceph_monitoring('node-exporter', ctx=ctx, config=config),
-            lambda: ceph_monitoring('alertmanager', ctx=ctx, config=config),
-            lambda: ceph_monitoring('grafana', ctx=ctx, config=config),
+            lambda: monitoring_rolespec('prometheus', ctx=ctx, config=config) if use_spec_file\
+            else ceph_monitoring('prometheus', ctx=ctx, config=config),
+            lambda: monitoring_rolespec('node-exporter', ctx=ctx, config=config) if use_spec_file\
+            else ceph_monitoring('node-exporter', ctx=ctx, config=config),
+            lambda: monitoring_rolespec('alertmanager', ctx=ctx, config=config) if use_spec_file\
+            else ceph_monitoring('alertmanager', ctx=ctx, config=config),
+            lambda: monitoring_rolespec('grafana', ctx=ctx, config=config) if use_spec_file\
+            else ceph_monitoring('grafana', ctx=ctx, config=config),
             lambda: ceph_clients(ctx=ctx, config=config),
     ):
         ctx.managers[cluster_name] = CephManager(
